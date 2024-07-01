@@ -31,13 +31,13 @@ model: math.Matrix4f32
 view: math.Matrix4f32
 projection: math.Matrix4f32
 cam: Camera
-
+position:glm.vec3
 
 lightPos: glm.vec3
 
 lastFrame, deltaTime,currentFrame :f32
 
-test_model: Model
+test_model: Scene
 
 lastXpos: f32
 lastYpos: f32
@@ -49,20 +49,8 @@ linear : UniformValue
 constant : UniformValue
 quadratic :UniformValue
 
-
-cubePositions :[]glm.vec3= 
-{
-    { 0.0, 0.0,  0.0},
-    { 2.0, 5.0, -15.0},
-    { -1.5, -2.2, -2.5},
-    { -3.8, -2.0, -12.3},
-    { 2.4, -0.4, -3.5},
-    { -1.7, 3.0, -7.5},
-    { 1.3, -2.0, -2.5},
-    { 1.5, 2.0, -2.5},
-    { 1.5, 0.2, -1.5},
-    { -1.3, 1.0, -1.5}
-}
+BaseCube : Scene
+BaseArch : Scene
 
 init :: proc() -> glfw.WindowHandle {
 	   coral = {1.0,0.5,0.31}
@@ -103,8 +91,24 @@ init :: proc() -> glfw.WindowHandle {
 		glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED);
 		//fmt.println(give_output())
 		
-		test_model= ModelCreatePath("Models/Avocado.glb")
-		setupMesh(&test_model)
+		//test_model.models= ModelCreatePath("Models/survival_guitar_backpack.glb")
+		test_model.models= ModelCreatePath("Models/baseCube.glb")
+		BaseCube.models =  ModelCreatePath("Models/unitbox.glb")
+		BaseArch.models =  ModelCreatePath("Models/Arch.glb")
+
+		fmt.print(BaseCube)
+		
+		test_model.transform = glm.mat4Scale({1,1,1})
+		BaseArch.transform = glm.mat4Scale({1,1,1})
+		BaseCube.transform = glm.mat4Scale({1,1,1})
+		//test_model.transform = glm.mat4Translate({0.2,2,0.4})
+		// for &i in test_model.models{
+		// 	setupMesh(&i)
+		// }
+
+		setup_scene(&test_model)
+		setup_scene(&BaseCube)
+		setup_scene(&BaseArch)
 		
 
 		program, shader_worked = gl.load_shaders("Shaders/shader1.vert", "Shaders/shader1.frag")
@@ -203,7 +207,7 @@ init :: proc() -> glfw.WindowHandle {
 	gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.diffuse"), 0)
 	gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.specular"), 1)
 
-
+	position = 1
 
 	//stb.image_free(data)
 	model = 1
@@ -259,6 +263,44 @@ update :: proc() {
 		   glfw.PRESS) {
 		CameraProcessMovement(&cam, .DOWN, movSpeed)
 	}
+	if (glfw.GetKey(window,glfw.KEY_SPACE) == glfw.PRESS ) {
+		CameraProcessMovement(&cam, .SPACE, movSpeed)
+
+	}
+	tempSpeed :f32=0.6
+	if (glfw.GetKey(window, glfw.KEY_I) == glfw.PRESS ) {
+		spotA.y += tempSpeed * deltaTime
+	} 
+	if (glfw.GetKey(window, glfw.KEY_K) == glfw.PRESS ) {
+		spotA.y -= tempSpeed * deltaTime
+	}if (glfw.GetKey(window, glfw.KEY_J) == glfw.PRESS ) {
+		spotA.x += tempSpeed * deltaTime
+	} 
+	if (glfw.GetKey(window, glfw.KEY_L) == glfw.PRESS ) {
+		spotA.x -= tempSpeed * deltaTime
+	}if (glfw.GetKey(window, glfw.KEY_U) == glfw.PRESS ) {
+		spotA.z += tempSpeed * deltaTime
+	} 
+	if (glfw.GetKey(window, glfw.KEY_O) == glfw.PRESS ) {
+		spotA.z -= tempSpeed * deltaTime
+	}
+	//spotb
+	if (glfw.GetKey(window, glfw.KEY_T) == glfw.PRESS ) {
+		spotB.y += tempSpeed * deltaTime
+	} 
+	if (glfw.GetKey(window, glfw.KEY_G) == glfw.PRESS ) {
+		spotB.y -= tempSpeed * deltaTime
+	}if (glfw.GetKey(window, glfw.KEY_F) == glfw.PRESS ) {
+		spotB.x += tempSpeed * deltaTime
+	} 
+	if (glfw.GetKey(window, glfw.KEY_H) == glfw.PRESS ) {
+		spotB.z -= tempSpeed * deltaTime
+	}if (glfw.GetKey(window, glfw.KEY_R) == glfw.PRESS ) {
+		spotB.z += tempSpeed * deltaTime
+	} 
+	if (glfw.GetKey(window, glfw.KEY_Y) == glfw.PRESS ) {
+		spotB.z -= tempSpeed * deltaTime
+	}
 }
 
 
@@ -270,84 +312,25 @@ draw :: proc() {
 	lightPos.y = f32(math.sin((glfw.GetTime()/2.0))) * 1.0 
 
 	gl.UseProgram(lightProgram)
-
-	lightColor : glm.vec3  =  {1.0,1.0,1.0}
+	shadder :Shadder
+	shadder.mProgram = lightProgram
 	
-	diffuseColor := lightColor * 0.5
-	ambientColor := lightColor * 0.2
-	objectColor : glm.vec3 =  {1.0,0.5,0.3}
-   //gl.Uniform3fv(gl.GetUniformLocation(lightProgram,"light.position"),1,&lightPos[0])
-	gl.Uniform3fv(gl.GetUniformLocation(lightProgram,"light.ambient"),1,&ambientColor[0])
-	gl.Uniform3fv(gl.GetUniformLocation(lightProgram,"light.diffuse"),1,&diffuseColor[0])
-	gl.Uniform3f(gl.GetUniformLocation(lightProgram,"light.specular"),1.0,1.0,1.0)
-	val :=UniformValue_make(lightProgram,"viewPos",cam.position);
-	UniformValue_set(lightProgram,val)
-	//	gl.Uniform3fv(gl.GetUniformLocation(lightProgram,"viewPos"),1,&cam.position[0])
+	//draw_scene(test_model,&shadder,lightPos,cam,view,projection)
+	//test_model.transform *= glm.mat4Scale({1,1,1})
+ 
+	//new_m := test_model
+	//new_m.transform += glm.mat4Translate(position)
+	//position.x += 0.07 * deltaTime
+	//draw_scene(new_m,&shadder,lightPos,cam,view,projection)
 	
-	ambiant :=UniformValue_make(lightProgram, "material.ambient",[3]f32{1.0,0.5,0.31})
-	UniformValue_set(lightProgram,ambiant)
-	
-	lightPosition := UniformValue_make(lightProgram,"light.position", cam.position)
-	lightDirection := UniformValue_make(lightProgram, "light.direction", cam.front)
-	cutOff := UniformValue_make(lightProgram, "light.cutOff", glm.cos(glm.radians_f32(12.5)))
-	constant = UniformValue_make(lightProgram, "light.contant" ,1.0)
-	linear = UniformValue_make(lightProgram, "light.linear" , 0.09)
-	quadratic = UniformValue_make(lightProgram, "light.quadratic" ,0.032)
-
-	UniformValue_set(lightProgram,constant)
-	UniformValue_set(lightProgram,linear)
-	UniformValue_set(lightProgram,quadratic)
-	UniformValue_set(lightProgram,lightPosition)
-	UniformValue_set(lightProgram,lightDirection)
-	UniformValue_set(lightProgram,cutOff)
-
-	//gl.Uniform3f(gl.GetUniformLocation(lightProgram,"material.ambient"),1.0,0.5,0.31)
-	gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.diffuse"),0)
-	gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.specular"),1)
-
-	//gl.Uniform3f(gl.GetUniformLocation(lightProgram,"material.specular"),0.5,0.5,0.5)
-	gl.Uniform1f(gl.GetUniformLocation(lightProgram,"material.shininess"),32.0)
-
-
-	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D,test_model.textures)
-	gl.ActiveTexture(gl.TEXTURE1)
-	gl.BindTexture(gl.TEXTURE_2D,test_model.textures)
-
-	gl.Uniform3fv(gl.GetUniformLocation(lightProgram,"objectColor"),1,&objectColor[0])
-	gl.Uniform3fv(gl.GetUniformLocation(lightProgram,"lightColor"),1,&lightColor[0])
-	gl.UniformMatrix4fv(gl.GetUniformLocation(lightProgram,"projection"),1,gl.FALSE,&projection[0][0])
-	gl.UniformMatrix4fv(gl.GetUniformLocation(lightProgram,"view"),1,gl.FALSE,&view[0][0])
-	//model *= glm.mat4Rotate({1, 0.5, 0}, f32(math.to_radians(glfw.GetTime() * 45.0)))
-	gl.BindVertexArray(test_model.buffer.VAO)
-	gl.UniformMatrix4fv(gl.GetUniformLocation(lightProgram,"model"),1,gl.FALSE,&model[0][0])
-	
-	for i in 1 ..= 9 {
-		model = 1.0
-		//fmt.print(cubePositions[i])
-		model *= glm.mat4Translate( cubePositions[i]  )
-		scale : glm.vec3=10.3
-		model *= glm.mat4Scale(scale)
-	 
-		model *= glm.mat4Rotate({1.0,0.5,0.3},glm.radians_f32(f32(i) * 20.0))
-		gl.UniformMatrix4fv(gl.GetUniformLocation(lightProgram,"model"),1, gl.FALSE, &model[0][0])
-		
-		//fmt.print("len",i32(len(test_model.indicies)))
-		
-		gl.BindVertexArray(test_model.buffer.VAO)
-		gl.DrawElements(gl.TRIANGLES, i32(len(test_model.indicies)),gl.UNSIGNED_INT,nil)
-	}
-	
-	//gl.DrawArrays(gl.TRIANGLES, 0, 36)
-	
-	
+	MainLevel(&shadder,lightPos,cam,view,projection)
 
 	gl.UseProgram(program)
 
 	model = 1.0
 	model *= glm.mat4Translate(lightPos)
 	scale : glm.vec3=0.3
-	model *= glm.mat4Scale(scale)
+	//model *= glm.mat4Scale(scale)
 	view = CameraViewMatrix(cam)
 	gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
 	gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
@@ -373,6 +356,7 @@ key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods
 			showCurser = !showCurser
 			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
 		}
+
 	}
 }
 

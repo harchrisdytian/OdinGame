@@ -24,6 +24,7 @@ Direction :: enum{
     UP,
     LEFT,
     RIGHT,
+    SPACE,
     DOWN
 }
 processCameraMouseMovements::proc "contextless"(camera : ^Camera,xoffset:f32,yoffset:f32){
@@ -62,6 +63,8 @@ CameraProcessMovement :: proc "contextless" (camera:^Camera,MovementDir:Directio
             camera.position -=camera.right *speed
         case.RIGHT:
             camera.position += camera.right *speed
+        case .SPACE:
+            camera.position += camera.up * speed;
     }
     //fmt.println(camera.position)
     CameraRecalculateVectors(camera)

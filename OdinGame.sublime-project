@@ -1,0 +1,26 @@
+{
+	"folders":
+	[
+		{
+			"path": ".",
+		}
+	],
+	"build_systems":
+	[
+		
+		{
+			"name": "odin",
+			"cmd": "odin run ."
+		}
+	],
+	"settings":
+	{
+		"LSP":
+		{
+			"odin":
+			{
+				"enabled": true
+			}
+		}
+	},
+}

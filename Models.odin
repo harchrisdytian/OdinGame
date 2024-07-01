@@ -26,25 +26,28 @@ buffers ::struct{
 } 
 
 Model:: struct{
-    vertices :[dynamic]Vertex,
+    vertices: [dynamic]Vertex,
     indicies: [dynamic]u32,
     textures: u32,
-    buffer:buffers
+    buffer:buffers,
+
+    mat : glm.mat4
 }
 
-
-Image:: struct{
-    data :[]byte
+Scene:: struct{
+    models:[]Model,
+    transform: glm.mat4
 }
 
-ModelCreatePath::proc(path:cstring, alloc := context.allocator ) -> Model{
+ModelCreatePath::proc(path:cstring, alloc := context.allocator ) -> []Model{
     options :cgltf.options
     data : ^cgltf.data
     res: cgltf.result
     Value : Model
+    Values : [dynamic]Model
     albedo_data :[^]byte
     
-    //loading the data
+    // loading the data
     data, res = cgltf.parse_file(options,path)
     defer cgltf.free(data)
     
@@ -52,72 +55,107 @@ ModelCreatePath::proc(path:cstring, alloc := context.allocator ) -> Model{
         if(res != cgltf.result.success)
         {
             fmt.print("ERROR: did not parse the gltf file")
-            return Value
+            return Values[:]
         } 
         res = cgltf.load_buffers(options,data,path)   
         if(res != cgltf.result.success)
         {
             fmt.print("ERROR: did not load the gltf file")
-            return Value
+            return Values[:]
         }
         res = cgltf.validate(data);
         if(res != cgltf.result.success)
         {
             fmt.print("ERROR: did not validate the gltf file")
-            return Value;
+            return Values[:];
         }
-    
-    
-    //fmt.print(data.nodes[0])0
-    for node, index in data.nodes{
-        //node : cgltf.node
-       // fmt.print(node)
-        mesh := node.mesh
-        if mesh == nil
-        {
-
-            continue
-        }
-        //fmt.print(mesh.primitives[0])
         
-        for primitive in node.mesh.primitives{
-            //primitive : cgltf.primitive
-            Value.vertices = make( [dynamic]Vertex,
-                primitive.attributes[0].data.count ,
-                primitive.attributes[0].data.count  )    
-               // fmt.print("help")
-            //fmt.print(primitive.attributes)
-            for i in 0..< primitive.indices.count{
-                append(&Value.indicies,u32(cgltf.accessor_read_index(primitive.indices,i)))
+        
+        //fmt.print(data.nodes[0])0
+        for node, index in data.nodes{
+            //node : cgltf.node
+            
+            
+            if node.has_matrix
+            {   
+                fmt.print("has mat")
+                Value.mat = transmute(glm.mat4)node.matrix_
+            }
+            else
+            {    
+                rotation : glm.vec4
+                position :glm.vec3
+                scale :glm.vec3
+                if node.has_rotation
+                {   
+                    fmt.print("rot")
+                    rotation =  glm.vec4(node.rotation)
+                }
+                if node.has_translation
+                {
+                    fmt.print("trans")
+                    
+                    position = glm.vec3(node.translation);
+                }
+                if node.has_scale
+                {
+                    fmt.print("scale")
+                    
+                    scale = glm.vec3(node.scale)
+                }
+                mat_ :glm.mat4 =1.0
+                mat_ += glm.mat4FromQuat(quaternion(rotation.x,rotation.y,rotation.z,rotation.w))
+                
+                mat_ +=glm.mat4Translate(position)
+                Value.mat = mat_
+            }
+            mesh := node.mesh
+            if mesh == nil 
+            {
+                
+                continue
             }
             
-            if(primitive.material != nil && primitive.material.has_pbr_metallic_roughness)
+            defer append(&Values,Value)
+            for primitive in node.mesh.primitives{
+                //primitive : cgltf.primitive
+                Value.vertices = nil
+                Value.vertices = make( [dynamic]Vertex,
+                    primitive.attributes[0].data.count ,
+                    primitive.attributes[0].data.count  )    
+                    
+                    Value.indicies = nil
+                    for i in 0..< primitive.indices.count{
+                        append(&Value.indicies,u32(cgltf.accessor_read_index(primitive.indices,i)))
+            }
+
+            if(primitive.material != nil && primitive.material.has_pbr_metallic_roughness )
             {
                 prim_texture :^cgltf.texture
-                if(primitive.material.pbr_metallic_roughness.base_color_texture.texture !=nil){
+                if(primitive.material.pbr_metallic_roughness.base_color_texture.texture !=nil ){
 
                     prim_texture = primitive.material.pbr_metallic_roughness.base_color_texture.texture
-                    fmt.println("texture data")
+                   // fmt.println("texture data")
                 }
-
                 buffer_view := prim_texture.image_.buffer_view
-                
                 color_data := buffer_view.buffer.data
-                //color_offset := buffer_view.offset
                 color_data_size := buffer_view.size
-                fmt.println(prim_texture.image_.mime_type)
 
                 if(color_data != nil){
                 
-                    albedo_data :[^]byte= (cast([^]byte)(uintptr(color_data)))
+                    albedo_data :[^]byte= (cast([^]byte)(uintptr(color_data)+uintptr(buffer_view.offset)))
                     //fmt.printf("somebit %d \n",&albedo_data[1])
                     width,height ,nrComponents:i32
-                    
-                    albedo_data = stb.load_from_memory(albedo_data,i32(buffer_view.buffer.size),&width,&height,&nrComponents,0)
-                    fmt.printf("somebit2 %#04hhx  \n",albedo_data[7343])
-                    fmt.print("width", width)
+                    //albedo_data.printf()
+                    //fmt.print( len(albedo_data[:]))
+                   albedo_data = stb.load_from_memory(albedo_data,i32(buffer_view.buffer.size),&width,&height,&nrComponents,0)
+                    //fmt.printf("somebit2 %#04hhx  \n",albedo_data[7343])
+                    //fmt.print("width", size_of(albedo_data))
+                   // fmt.print("width", cap(albedo_data))
+                   //fmt.print("index", index,"value")
                    Value.textures = gltf_load_texture(albedo_data,width,height,nrComponents)
-                    
+                   
+                    //fmt.println("value: ",(Value.textures))
                 }
                 
                 //fmt.println("anything: " )
@@ -134,18 +172,18 @@ ModelCreatePath::proc(path:cstring, alloc := context.allocator ) -> Model{
                 #partial switch  acessor.type{
                     case cgltf.type.vec2: 
                     {   
-                        fmt.print("anything ")
+                        //fmt.print("anything ")
                         float_data = GltfGetFloats(2,acessor)
                     }
                     case cgltf.type.vec3: 
                     {
-                        fmt.print("anything ")
+                        //fmt.print("anything ")
 
                         float_data = GltfGetFloats(3,acessor)
                     }
                     case cgltf.type.vec4: 
                     {
-                        fmt.print("anything " )
+                        //fmt.print("anything " )
 
                         float_data = GltfGetFloats(4,acessor)
                     }
@@ -188,7 +226,7 @@ ModelCreatePath::proc(path:cstring, alloc := context.allocator ) -> Model{
     }  
     //fmt.print("something")
     
-    return Value
+    return Values[:]
 }
 
 GltfGetFloats :: proc(componentCount : uint, Acessor : ^cgltf.accessor, alloc := context.allocator) -> [dynamic]f32{
@@ -234,16 +272,16 @@ setupMesh ::proc(_model : ^Model, alloc :=context.allocator)
     
     gl.BindBuffer(gl.ARRAY_BUFFER, _model.buffer.VBO)
 
-    fmt.println(len(_model.vertices))
+    //fmt.println(len(_model.vertices))
     gl.BufferData(gl.ARRAY_BUFFER,len(_model.vertices) *size_of(_model.vertices[0]), &_model.vertices[0],gl.STATIC_DRAW)
     
-    fmt.println(size_of(_model.indicies))
+   // fmt.println(size_of(_model.indicies))
     
     gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER,_model.buffer.EBO)
     
     gl.BufferData(gl.ELEMENT_ARRAY_BUFFER,len(_model.indicies)*size_of(u32),&_model.indicies[0],gl.STATIC_DRAW)
     
-    fmt.println(size_of(Vertex)," ",offset_of(Vertex,normal),offset_of(Vertex,uv))
+    //fmt.println(size_of(Vertex)," ",offset_of(Vertex,normal),offset_of(Vertex,uv))
     gl.EnableVertexAttribArray(0)
     gl.VertexAttribPointer(0,3,gl.FLOAT,gl.FALSE,size_of(Vertex),uintptr(0))
     
@@ -290,4 +328,68 @@ gltf_load_texture ::proc(data: [^]byte, width :i32, height :i32, nrComponents:i3
 
 	return textureID		
     
+}
+
+
+draw_scene :: proc(scene:Scene,shader :^Shadder,lightDirection:glm.vec3,
+    camera:Camera, view:glm.mat4, projection:glm.mat4)
+{
+    gl.UseProgram(shader.mProgram)
+    shader.mLight.ambient = UniformValue_make(shader.mProgram,"light.ambient",[3]f32{1.0,0.5,0.31})
+    shader.mLight.specular = UniformValue_make(shader.mProgram,"light.specular",[3]f32{1.0,1.0,10.})
+    shader.mLight.diffuse = UniformValue_make(shader.mProgram, "light.diffuse",[3]f32{0.5,0.5,0.5})
+    shader.mLight.linear = UniformValue_make(shader.mProgram,"light.linear",0.09)
+    shader.mLight.constant = UniformValue_make(shader.mProgram, "light.constant" ,1.0)
+    shader.mLight.quadratic = UniformValue_make(shader.mProgram, "light.quadratic" ,0.032)
+    shader.mLight.cutOff = UniformValue_make(shader.mProgram, "light.cutOff", glm.cos(glm.radians_f32(12.5)))
+    
+    for i in scene.models
+    {
+        
+        mod := scene.transform * glm.mat4(  i.mat ) ;
+        //posit = {0.0,0.0,3.0}
+        posit := camera.position
+        shader.mLight.direction =UniformValue_make(shader.mProgram,"light.position", posit)
+        shader.mLight.position = UniformValue_make(shader.mProgram, "light.direction", camera.front)
+        shader.mMaterial.shininess = UniformValue_make(shader.mProgram,"material.shininess",32.0)
+        shader.mMaterial.diffuse =UniformValue_make(shader.mProgram,"material.diffuse",i32(0))
+        shader.mMaterial.specular =UniformValue_make(shader.mProgram,"material.specular",i32(1))
+        shader.viewPos = UniformValue_make(shader.mProgram,"viewPos",posit)
+        shader.view = UniformValue_make(shader.mProgram,"view",view)
+        shader.projection = UniformValue_make(shader.mProgram,"projection",projection)
+        shader.model = UniformValue_make(shader.mProgram,"model",mod)
+        
+        UniformValue_set(shader.mProgram, shader.view)
+        UniformValue_set(shader.mProgram, shader.projection)
+        UniformValue_set(shader.mProgram, shader.viewPos)
+        UniformValue_set(shader.mProgram, shader.model)
+        UniformValue_set(shader.mProgram, shader.mLight.ambient)
+        UniformValue_set(shader.mProgram, shader.mLight.specular)
+        UniformValue_set(shader.mProgram, shader.mLight.diffuse)
+        UniformValue_set(shader.mProgram, shader.mLight.linear)
+        UniformValue_set(shader.mProgram, shader.mLight.constant)
+        UniformValue_set(shader.mProgram, shader.mLight.quadratic)
+        UniformValue_set(shader.mProgram, shader.mLight.cutOff)
+        UniformValue_set(shader.mProgram, shader.mLight.direction)
+        UniformValue_set(shader.mProgram, shader.mLight.position)
+        UniformValue_set(shader.mProgram, shader.mMaterial.shininess)
+        UniformValue_set(shader.mProgram, shader.mMaterial.diffuse)
+        UniformValue_set(shader.mProgram, shader.mMaterial.specular)
+
+        gl.ActiveTexture(gl.TEXTURE0)
+		gl.BindTexture(gl.TEXTURE_2D,i.textures)
+		gl.ActiveTexture(gl.TEXTURE1)
+		gl.BindTexture(gl.TEXTURE_2D,i.textures)
+        gl.BindVertexArray(i.buffer.VAO)
+		gl.DrawElements(gl.TRIANGLES, i32(len(i.indicies)),gl.UNSIGNED_INT,nil)
+        
+        
+    }
+}
+
+setup_scene :: proc(model :^Scene){
+    for &i in model.models{
+        setupMesh(&i)
+    }
+
 }
