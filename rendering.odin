@@ -51,10 +51,11 @@ quadratic :UniformValue
 
 BaseCube : Scene
 BaseArch : Scene
+ter :terrain
 
 init :: proc() -> glfw.WindowHandle {
-	   coral = {1.0,0.5,0.31}
-	   
+	   //coral = {1.0,0.5,0.31}
+		   
 	   
 	   cam.position = {0.0, 0.0, 3.0}
 	   cam.worldUp = {0.0, 1.0, 0.0}
@@ -75,11 +76,12 @@ init :: proc() -> glfw.WindowHandle {
 		   return nil
 		}
 		
-		window = glfw.CreateWindow(512, 512, "something", nil, nil)
-		//defer glfw.DestroyWindow(window)
-		
-		// setting callbacks
-		
+		_vidMode :^glfw.VidMode=glfw.GetVideoMode(glfw.GetPrimaryMonitor())
+		glfw.WindowHint(glfw.RED_BITS,_vidMode.red_bits)
+		glfw.WindowHint(glfw.GREEN_BITS,_vidMode.green_bits)
+		glfw.WindowHint(glfw.BLUE_BITS,_vidMode.blue_bits)
+		glfw.WindowHint(glfw.REFRESH_RATE,_vidMode.refresh_rate)	
+		window = glfw.CreateWindow(_vidMode.width, _vidMode.height, "something", glfw.GetPrimaryMonitor(), nil)
 		
 		glfw.MakeContextCurrent(window)
 		glfw.SwapInterval(1)
@@ -94,21 +96,22 @@ init :: proc() -> glfw.WindowHandle {
 		//test_model.models= ModelCreatePath("Models/survival_guitar_backpack.glb")
 		test_model.models= ModelCreatePath("Models/baseCube.glb")
 		BaseCube.models =  ModelCreatePath("Models/unitbox.glb")
-		BaseArch.models =  ModelCreatePath("Models/Arch.glb")
-
-		fmt.print(BaseCube)
+		BaseArch.models =  ModelCreatePath("Models/survival_guitar_backpack.glb")
+		//fmt.print(BaseArch)
+		//fmt.print(BaseArch)
 		
-		test_model.transform = glm.mat4Scale({1,1,1})
+		test_model.transform = glm.mat4Scale({1,1,1}) *0.01
 		BaseArch.transform = glm.mat4Scale({1,1,1})
 		BaseCube.transform = glm.mat4Scale({1,1,1})
 		//test_model.transform = glm.mat4Translate({0.2,2,0.4})
 		// for &i in test_model.models{
-		// 	setupMesh(&i)
-		// }
-
-		setup_scene(&test_model)
-		setup_scene(&BaseCube)
-		setup_scene(&BaseArch)
+			// 	setupMesh(&i)
+			// }
+			
+			ter = make_terrain("HeightMaps/hightmap.png")
+			setup_scene(&test_model)
+			setup_scene(&BaseCube)
+			setup_scene(&BaseArch)
 		
 
 		program, shader_worked = gl.load_shaders("Shaders/shader1.vert", "Shaders/shader1.frag")
@@ -120,6 +123,7 @@ init :: proc() -> glfw.WindowHandle {
 		if(!shader_worked){
 			fmt.print("light shder")
 		}
+
 	vert_data := [?] f32 { 
 		-0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
 		0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
@@ -213,7 +217,7 @@ init :: proc() -> glfw.WindowHandle {
 	model = 1
 	view = 1
 	projection = 1
-	projection = glm.mat4Perspective(f32(math.to_radians(45.0)), 512 / 512, 0.1, 100)
+	projection = glm.mat4Perspective(f32(math.to_radians(45.0)), 512 / 512, 0.1, 1000)
 	model *= glm.mat4Rotate({1, 0.5, 0}, f32(math.to_radians(glfw.GetTime() * 45.0)))
 	view = CameraViewMatrix(cam)
 
@@ -244,7 +248,7 @@ update :: proc() {
     deltaTime = currentFrame - lastFrame
     lastFrame = currentFrame
 	key := glfw.GetKey(window, glfw.KEY_W)
-    movSpeed := 2.5 * deltaTime
+    movSpeed := 19.5 * deltaTime
 
 	if (glfw.GetKey(window, glfw.KEY_W) == glfw.PRESS ||
 		   glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS) {
@@ -267,7 +271,7 @@ update :: proc() {
 		CameraProcessMovement(&cam, .SPACE, movSpeed)
 
 	}
-	tempSpeed :f32=0.6
+	tempSpeed :f32=1.9
 	if (glfw.GetKey(window, glfw.KEY_I) == glfw.PRESS ) {
 		spotA.y += tempSpeed * deltaTime
 	} 
@@ -323,7 +327,7 @@ draw :: proc() {
 	//position.x += 0.07 * deltaTime
 	//draw_scene(new_m,&shadder,lightPos,cam,view,projection)
 	
-	MainLevel(&shadder,lightPos,cam,view,projection)
+	MainLevel(&shadder,lightPos,cam,view,projection,&ter)
 
 	gl.UseProgram(program)
 
@@ -380,7 +384,7 @@ mouse_callback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 size_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
 
 	gl.Viewport(0, 0, width, height)
-
+	projection = glm.mat4Perspective(f32(math.to_radians(45.0)), f32(width) / f32(height), 0.1, 1000)
 }
 
 load_texture :: proc (path: cstring ) -> u32 {

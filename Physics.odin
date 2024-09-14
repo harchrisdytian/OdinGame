@@ -2,7 +2,7 @@ package main
 
 import glm "core:math/linalg/glsl"
 
-// taken from real-time collison
+// taken from real-time collison by christipher ericson
 // center represented by a point and
 // size reprisented by half width extents
 AxisAlignedBoundingBox :: struct{
@@ -25,8 +25,8 @@ CollisionShape :: union{
 OBB_OBB_OverLaps::proc( BoxA:OrientedBoundingBox,
                         BoxB :OrientedBoundingBox) -> bool
 {
-    rBoxA,rBoxB:f32
-    Rotation, AbsoluteRotation:glm.mat3
+    ra,rb:f32
+    Rotation, absoluteRotation:glm.mat3
 
     // computr boxes rotation in terms of b
 
@@ -36,35 +36,101 @@ OBB_OBB_OverLaps::proc( BoxA:OrientedBoundingBox,
         }
     }
 
-    TransFrame : glm.vec3
+    RelativeSpace : glm.vec3
 
-    TransFrame = BoxB.center - BoxA.center
-    TransFrame = {glm.dot(TransFrame,BoxA.orientation[0]),glm.dot(TransFrame,BoxA.orientation[2]),glm.dot(TransFrame,BoxA.orientation[2])}
+    RelativeSpace = BoxB.center - BoxA.center
+    RelativeSpace = {glm.dot(RelativeSpace,BoxA.orientation[0]),glm.dot(RelativeSpace,BoxA.orientation[1]),glm.dot(RelativeSpace,BoxA.orientation[2])}
 
     // calcualte common subexpression
     for i in 0..=2{
         for j in 0..=2{
-            AbsoluteRotation[i][j] = abs(Rotation[i][j]) + glm.F32_EPSILON
+            absoluteRotation[i][j] = abs(Rotation[i][j]) + glm.F32_EPSILON
         }
     }
 
-
+    //test axes = A0, A1, A2
     for i in 0..=2{
-        rBoxA = BoxA.size[i]
-        rBoxB = BoxB.size[0] * AbsoluteRotation[i][0] + BoxB.size[1] * AbsoluteRotation[i][1] + BoxB.size[2] * AbsoluteRotation[i][1]
-        if( abs(TransFrame[i]) > rBoxA + rBoxB ){
-            return false
-        }
-    }
-    
-    for i in 0..=2{
-        rBoxA = BoxA.size[0] * AbsoluteRotation[0][i] + BoxA.size[1] * AbsoluteRotation[1][i] + BoxA.size[2] * AbsoluteRotation[2][i]
-        rBoxB = BoxB.size[i]
-        if(abs(TransFrame[0] * Rotation[0][i] - TransFrame[1] * Rotation[1][i] + TransFrame[2] * Rotation[2][i]) > rBoxA +rBoxB){
+        ra = BoxA.size[i]
+        rb = BoxB.size[0] * absoluteRotation[i][0] + BoxB.size[1] * absoluteRotation[i][1] + BoxB.size[2] * absoluteRotation[i][2]
+        if( abs(RelativeSpace[i]) > ra + rb ){
             return false
         }
     }
 
+    // Test axes L = B0, L = B1, L = B2
+    for i in 0..=2{
+        ra = BoxA.size[0] * absoluteRotation[0][i] + BoxA.size[1] * absoluteRotation[1][i] + BoxA.size[2] * absoluteRotation[2][i]
+        rb = BoxB.size[i]
+        if(abs(RelativeSpace[0] * Rotation[0][i] + RelativeSpace[1] * Rotation[1][i] + RelativeSpace[2] * Rotation[2][i]) > ra + rb){
+            return false
+        }
+    }
+
+    // a0 X B0
+    ra = BoxA.size[1] * absoluteRotation[2][0] + BoxA.size[2] * absoluteRotation[1][0]
+    rb = BoxB.size[1] * absoluteRotation[0][2] + BoxB.size[2] * absoluteRotation[0][1]
+    if (abs(RelativeSpace[2] * Rotation[1][0] - RelativeSpace[1] * Rotation[2][0]) > ra + rb) 
+    {
+        return false
+    }
+
+    // Test axis L = A0 x B1
+    ra = BoxA.size[1] * absoluteRotation[2][1] + BoxA.size[2] * absoluteRotation[1][1];
+    rb = BoxB.size[0] * absoluteRotation[0][2] + BoxB.size[2] * absoluteRotation[0][0];
+    if (abs(RelativeSpace[2] * Rotation[1][1] - RelativeSpace[1] * Rotation[2][1]) > ra + rb)
+    {
+        return false
+    } 
+    // Test axis L = A0 x B2
+    ra = BoxA.size[1] * absoluteRotation[2][2] + BoxA.size[2] * absoluteRotation[1][2];
+    rb = BoxB.size[0] * absoluteRotation[0][1] + BoxB.size[1] * absoluteRotation[0][0];
+    if (abs(RelativeSpace[2] * Rotation[1][2] - RelativeSpace[1] * Rotation[2][2]) > ra + rb) 
+    {
+        return false
+    }
+    // Test axis L = A1 x B0
+    ra = BoxA.size[0] * absoluteRotation[2][0] + BoxA.size[2] * absoluteRotation[0][0];
+    rb = BoxB.size[1] * absoluteRotation[1][2] + BoxB.size[2] * absoluteRotation[1][1];
+
+    if (abs(RelativeSpace[0] * Rotation[2][0] - RelativeSpace[2] * Rotation[0][0]) > ra + rb) 
+    {
+        return false
+    }
+    // Test axis L = A1 x B1
+    ra = BoxA.size[0] * absoluteRotation[2][1] + BoxA.size[2] * absoluteRotation[0][1];
+    rb = BoxB.size[0] * absoluteRotation[1][2] + BoxB.size[2] * absoluteRotation[1][0];
+    if (abs(RelativeSpace[0] * Rotation[2][1] - RelativeSpace[2] * Rotation[0][1]) > ra + rb) 
+    {
+        return false
+    }
+    // Test axis L = A1 x B2
+    ra = BoxA.size[0] * absoluteRotation[2][2] + BoxA.size[2] * absoluteRotation[0][2];
+    rb = BoxB.size[0] * absoluteRotation[1][1] + BoxB.size[1] * absoluteRotation[1][0];
+    if (abs(RelativeSpace[0] * Rotation[2][2] - RelativeSpace[2] * Rotation[0][2]) > ra + rb) 
+    {
+        return false
+    }
+    // Test axis L = A2 x B0
+    ra = BoxA.size[0] * absoluteRotation[1][0] + BoxA.size[1] * absoluteRotation[0][0];
+    rb = BoxB.size[1] * absoluteRotation[2][2] + BoxB.size[2] * absoluteRotation[2][1];
+    if (abs(RelativeSpace[1] * Rotation[0][0] - RelativeSpace[0] * Rotation[1][0]) > ra + rb) 
+    {
+        return false
+    }
+    // Test axis L = A2 x B1
+    ra = BoxA.size[0] * absoluteRotation[1][1] + BoxA.size[1] * absoluteRotation[0][1];
+    rb = BoxB.size[0] * absoluteRotation[2][2] + BoxB.size[2] * absoluteRotation[2][0];
+    if (abs(RelativeSpace[1] * Rotation[0][1] - RelativeSpace[0] * Rotation[1][1]) > ra + rb) 
+    {
+        return false
+    }
+    // Test axis L = A2 x B2
+    ra = BoxA.size[0] * absoluteRotation[1][2] + BoxA.size[1] * absoluteRotation[0][2];
+    rb = BoxB.size[0] * absoluteRotation[2][1] + BoxB.size[1] * absoluteRotation[2][0];
+    if (abs(RelativeSpace[1] * Rotation[0][2] - RelativeSpace[0] * Rotation[1][2]) > ra + rb) 
+    {
+        return false
+    }
     return true
 }
 

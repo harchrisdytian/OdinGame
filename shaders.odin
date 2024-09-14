@@ -59,13 +59,12 @@ UniformValue_make :: proc (prog: u32,
     name: cstring,
     value : ShaderValue, 
     alloc := context.allocator ) -> UniformValue
-    {
+{
    loc := gl.GetUniformLocation(prog,name)
-   
    return UniformValue {location = loc,name = name,value = value};
 } 
 
-UniformValue_set:: proc (prog:u32,value:UniformValue)
+UniformValue_set:: proc (value:UniformValue)
 {
    
     switch &v in value.value{
