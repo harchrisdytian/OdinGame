@@ -90,7 +90,6 @@ make_terrain :: proc(hight_map_name :cstring) -> (ter : terrain)
 	ter.VAO = terrainVAO
 	ter.num_strips = NUM_STRIPS
 	ter.num_verts_per_strip = NUM_VERTS_PER_STRIP
-	fmt.print("end of function")
 	return ter
 }	
 

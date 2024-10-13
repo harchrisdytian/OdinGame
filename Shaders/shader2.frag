@@ -63,8 +63,8 @@ void main()
     vec3 result = (ambient + diffuse + specular) ;
    FragColor = vec4(result, theta);
     }
-    else
-    {
+   else
+   {
     FragColor =vec4(light.ambient * texture(material.diffuse, textCoords).rgb, 1.0);
    }
 }

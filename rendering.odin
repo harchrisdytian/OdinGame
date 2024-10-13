@@ -10,7 +10,6 @@ import stb "vendor:stb/image"
 import math "core:math/linalg"
 import glm "core:math/linalg/glsl"
 
-
 window: glfw.WindowHandle
 program: u32
 lightProgram: u32
@@ -25,7 +24,7 @@ texture2: u32
 modelLoc: i32
 viewLoc: i32
 projectionLoc: i32
-showCurser: bool
+
 
 model: math.Matrix4f32
 view: math.Matrix4f32
@@ -89,8 +88,10 @@ init :: proc() -> glfw.WindowHandle {
 		glfw.SetKeyCallback(window, key_callback)
 		gl.load_up_to(4, 6, glfw.gl_set_proc_address)
 		gl.Enable(gl.DEPTH_TEST)
+		size_callback(window,_vidMode.width,_vidMode.height)
 		
 		glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED);
+		glfw.SetCharCallback(window,GUI_charCallBack)
 		//fmt.println(give_output())
 		
 		//test_model.models= ModelCreatePath("Models/survival_guitar_backpack.glb")
@@ -230,6 +231,9 @@ init :: proc() -> glfw.WindowHandle {
 	gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
 
 	glfw.SetCursorPosCallback(window, mouse_callback)
+	
+	gui_init()
+	
 	return window
 
 
@@ -243,7 +247,10 @@ end :: proc(window: glfw.WindowHandle) {
 }
 
 update :: proc() {
-    
+    if GUI.state.isInDebugMode 
+	{
+		return 
+	}
     currentFrame = f32(glfw.GetTime())
     deltaTime = currentFrame - lastFrame
     lastFrame = currentFrame
@@ -271,6 +278,7 @@ update :: proc() {
 		CameraProcessMovement(&cam, .SPACE, movSpeed)
 
 	}
+
 	tempSpeed :f32=1.9
 	if (glfw.GetKey(window, glfw.KEY_I) == glfw.PRESS ) {
 		spotA.y += tempSpeed * deltaTime
@@ -347,20 +355,21 @@ draw :: proc() {
 
 	//fmt.print("in a loop")
 	gl.BindVertexArray(0)
+	GUI_Render()
 }
 
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
+	
 	if key == glfw.KEY_ESCAPE {
 		running = false
 	}
 
-	if key == glfw.KEY_TAB
+	if key == glfw.KEY_TAB && action == glfw.RELEASE
 	{
-		if(showCurser){
-			showCurser = !showCurser
+			
+			GUI.state.isInDebugMode = !GUI.state.isInDebugMode
 			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-		}
-
+		
 	}
 }
 
@@ -376,14 +385,18 @@ mouse_callback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 
 	lastXpos = f32(xpos)
 	lastYpos = f32(ypos)
-
-	processCameraMouseMovements(&cam, xoffset, yoffset)
+	if(!GUI.state.isInDebugMode)
+	{
+		processCameraMouseMovements(&cam, xoffset, yoffset)
+	}
 
 }
 
 size_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
-
+	
 	gl.Viewport(0, 0, width, height)
+	guiWidth = width
+	guiHeight = height
 	projection = glm.mat4Perspective(f32(math.to_radians(45.0)), f32(width) / f32(height), 0.1, 1000)
 }
 

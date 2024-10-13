@@ -38,7 +38,7 @@ MainLevel :: proc(
 	// boxA.orientation[2] = {0,0,1}
 
 	// boxARotation := glm.mat4Rotate({0,1,0},glm.degrees_f32(45))
-	// for &axis in boxA.orientation{
+	// for &axis in boxA.orientation{re
 	//     newVal:glm.vec4
 	//     newVal = glm.vec4({axis.x,axis.y,axis.z,0})
 	//     axis = (newVal * boxARotation).xyz
