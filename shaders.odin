@@ -16,7 +16,6 @@ ShaderValue :: union{
     [3]f32,
     i32,
     [3]i32,
-    glm.vec3,
     glm.mat4
 }
 
@@ -66,13 +65,10 @@ UniformValue_make :: proc (prog: u32,
 
 UniformValue_set:: proc (value:UniformValue)
 {
-   
     switch &v in value.value{
         case f32:
             gl.Uniform1fv(value.location,1,&v);
         case [3]f32:
-            gl.Uniform3fv(value.location,1,&v[0])
-        case glm.vec3:
             gl.Uniform3fv(value.location,1,&v[0])
         case i32:
             gl.Uniform1iv(value.location,1,&v);

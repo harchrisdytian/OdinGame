@@ -14,16 +14,18 @@ import "core:strings"
 import "vendor:stb/truetype"
 
 GUI_charAmount::96
+GUI_Command_size:: 1<<12
 GUI_data :: struct{
     state: GUI_state,
     imageData:[1<<23 ]byte,
     charData:[1<<23]truetype.bakedchar,
+    commands: [GUI_Command_size]GUI_RenderCommand,
     packedChar:[GUI_charAmount]truetype.packedchar,
     img : u32,
     projection: glm.mat4,
     program:u32,
     ArrayBuffer:u32,
-    ArrayObject:u32, 
+    ArrayObject:u32,
     rect :GUI_rectangle
 }
 
@@ -40,14 +42,21 @@ testString : string
 
 GUI_state::struct{
     isInDebugMode: bool,
-    
 }
 
-
-
+GUI_RenderCommandTypes:: enum{
+    none,
+    rectangle
+}
+GUI_RenderCommand:: struct{
+    command: GUI_RenderCommandTypes,
+    size: glm.vec2,
+    position:glm.vec2,
+    text: string
+}
 tempLetter :i32 = 32
-GUI : GUI_data 
-
+GUI : GUI_data
+// Sets up the initial data after calling openGl stuff
 gui_init :: proc(){
 
     fontHandle,fontERR := os.open("Fonts/ClearSans-Regular.ttf",os.O_RDONLY,0)
@@ -62,23 +71,21 @@ gui_init :: proc(){
 
      if(!fontSuccsess){
         fmt.print("failed to read file")
-     }     
+     }
      shaderErr:bool
      GUI.program ,shaderErr=gl.load_shaders("Shaders//TextShader.vert","Shaders//TextShader.frag")
      if(!shaderErr){
         fmt.print("failed to load font shader")
-
      }
      GUI.rect.program ,shaderErr=gl.load_shaders("Shaders//UIShader.vert","Shaders//UIShader.frag")
 
      if(!shaderErr){
         fmt.print("failed to load font shader")
-
-     }
+    }
 
     fontInfo :truetype.fontinfo
-    fontContext :truetype.pack_context 
-    
+    fontContext :truetype.pack_context
+
 
      if(!truetype.InitFont(&fontInfo,&fontData[0],0)){
         fmt.print("err: font didn't load")
@@ -91,11 +98,11 @@ gui_init :: proc(){
      GUI_SetupFontTexture( )
     gl.GenVertexArrays(1, &GUI.ArrayObject)
     gl.BindVertexArray(GUI.ArrayObject)
-    
+
     gl.GenBuffers(1, &GUI.ArrayBuffer)
-    
+
     gl.BindBuffer(gl.ARRAY_BUFFER,GUI.ArrayBuffer)
-    
+
     gl.EnableVertexAttribArray(0)
     gl.EnableVertexAttribArray(1)
     gl.VertexAttribPointer(0,2,gl.FLOAT,gl.FALSE,4 * size_of(f32),0)
@@ -109,85 +116,85 @@ gui_init :: proc(){
     gl.BindBuffer(gl.ARRAY_BUFFER,GUI.rect.ArrayBuffer)
     gl.EnableVertexAttribArray(0)
     gl.VertexAttribPointer(0,2,gl.FLOAT,gl.FALSE,2 * size_of(f32),0)
-    
-    
-    
  }
- 
+
 gui_render ::proc()
 {
      GUI_Render()
+
 }
 
 GUI_hover::proc(mousePos:glm.vec2,topLeft :glm.vec2,bottomRight:glm.vec2)->bool{
-    
+
     if( (mousePos.x <=bottomRight.x && mousePos.x >= topLeft.x ) &&
         (mousePos.y <= bottomRight.y && mousePos.y >= topLeft.y)){
        return true
-    }   
+    }
     return false
 }
 
 GUI_Button:: proc(label : string, position:glm.vec2, size:f32 ) -> bool
-{   
+{
     if GUI_hover(glm.vec2{lastXpos,lastYpos},position - glm.vec2{10,10}, (position - glm.vec2{20,20}) + glm.vec2{200,25})
     {
         if glfw.GetMouseButton(window,glfw.MOUSE_BUTTON_LEFT) != glfw.RELEASE
         {
-            GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25},glm.vec3{0.6,0.6,0.6}) 
+            GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25},glm.vec3{0.6,0.6,0.6})
             GUI_DrawText(label, position,size)
             return true
         }
         else
         {
-            GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25},glm.vec3{1.6,0.6,0.6}) 
-            
+            GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25},glm.vec3{1.6,0.6,0.6})
         }
-        
+
     }else{
         GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25})
     }
     GUI_DrawText(label, position,size)
-    
+
     return false
 }
 
-
+// Draws a rectangle of the given size
+// rectPos: is the top left
+// size: the left and right margin
+// color: the color in rgb space
 GUI_drawRect:: proc( rectPos:glm.vec2, size:glm.vec2, color :glm.vec3= {0.5,0.5,0.55})
 {
-    
+
     RectVerts :[]f32= {  //pos                      //uv
         rectPos.x          ,rectPos.y         ,
-        rectPos.x + size.x ,rectPos.y         , 
-        rectPos.x          ,rectPos.y + size.y, 
-        rectPos.x + size.x ,rectPos.y + size.y, 
+        rectPos.x + size.x ,rectPos.y         ,
+        rectPos.x          ,rectPos.y + size.y,
+        rectPos.x + size.x ,rectPos.y + size.y,
     }
 
     gl.UseProgram(GUI.rect.program)
     gl.Enable(gl.BLEND)
     gl.BlendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA)
-        
+
     backgroundColor :glm.vec3 = {0.5,0.5,0.8}
     proj := UniformValue_make(GUI.rect.program,"projection" ,GUI.projection)
     c := UniformValue_make(GUI.rect.program,"backgroundColor", color)
-    
+
     UniformValue_set(proj)
     UniformValue_set(c)
-    
+
     gl.BindVertexArray(GUI.rect.ArrayObject)
     gl.BindBuffer(gl.ARRAY_BUFFER,GUI.rect.ArrayBuffer)
     gl.BufferData(gl.ARRAY_BUFFER,len(RectVerts) * size_of(f32),&RectVerts[0], gl.DYNAMIC_DRAW)
-    
+
     if(GUI.state.isInDebugMode){
         gl.DrawArrays(gl.TRIANGLE_STRIP,0,i32(len(RectVerts)/2))
     }
 }
-
+//draws text given as string and position
 GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32)
 {
     tX,tY: f32
-    quad: truetype.aligned_quad 
-    
+    quad: truetype.aligned_quad
+
     maxX :f32= 0
     maxY :f32= 0
     CurPosX, CurPosY : = glfw.GetCursorPos(window)
@@ -195,15 +202,15 @@ GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32)
     {
 
         truetype.GetPackedQuad(&GUI.packedChar[0],512,512, i32(char)-32,&tX,&tY,&quad,true)
-        
+
         //glfw.SetCursorPos(window,f64(guiWidth)/2.0,f64(guiHeight)/2.0)
         glfw.SetInputMode(window,glfw.CURSOR,glfw.CURSOR_NORMAL)
         gl.UseProgram(GUI.program)
 
         //size :f32= 10
-        xPos :f32 = textPos.x + (size * f32(index)) 
+        xPos :f32 = textPos.x + (size * f32(index))
         yPos :f32 = textPos.y
-        
+
         maxX += quad.x1
         if (maxY < yPos + quad.y1 + size){
             maxY = yPos + quad.y1 + size
@@ -219,47 +226,44 @@ GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32)
         textColor := glm.vec3{1.0,1.0,1.0}
         uni := UniformValue_make(GUI.program,"projection",GUI.projection)
         c := UniformValue_make(GUI.program,"textColor", textColor)
-        
+
         UniformValue_set(uni)
         UniformValue_set(c)
-        
+
         charInd :[]i32={ 0,1,2 ,1,2,4}
         //gl.UseProgram(GUI.program)
-        
+
         gl.BindVertexArray(GUI.ArrayObject)
         gl.Enable(gl.BLEND)
         gl.BlendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA)
-        
+
         gl.BindTexture(gl.TEXTURE_2D,GUI.img)
         gl.ActiveTexture(gl.TEXTURE0)
         gl.BindVertexArray(GUI.ArrayObject)
         gl.BindBuffer(gl.ARRAY_BUFFER,GUI.ArrayBuffer)
         gl.BufferData(gl.ARRAY_BUFFER,len(CharVerts) * size_of(f32),&CharVerts[0], gl.DYNAMIC_DRAW)
-        
+
         if(GUI.state.isInDebugMode){
             gl.DrawArrays(gl.TRIANGLE_STRIP,0,i32(len(CharVerts)/4))
         }
     }
-
-     
 }
+
 GUI_Render :: proc(){
-        
+
         GUI.projection = glm.mat4Ortho3d(0,f32(guiWidth),f32(guiHeight),0,-10,100)
 
         tempString :string = "real Time"
         tempLetter +=1
         tempString = fmt.aprint("real time: ", tempLetter)
-        
-        
+
         if (GUI_Button("help", glm.vec2{20,100},1))
         {
-
             testString = ""
         }
-        
+
         GUI_DrawText(testString,glm.vec2{20,160},1)
-        
+
 }
 
 GUI_SetupFontTexture::proc(){
@@ -270,8 +274,24 @@ GUI_SetupFontTexture::proc(){
 
 }
 
+GUI_draw ::proc(commands : []GUI_RenderCommand){
+    for i in commands
+    {
+        switch  i.command
+        {
+            case .none:
+                GUI_DrawText(i.text, i.position,18)
+            case .rectangle:
+                GUI_drawRect(i.position, i.size,{0.3,0.3,0.3})
+                if i.text != ""
+                {
+                    GUI_DrawText(i.text, i.position,18)
+                }
+        }
+    }
+}
 GUI_charCallBack::proc "c" (window: glfw.WindowHandle, char: rune){
-    
+
     context = runtime.default_context()
     testString = fmt.tprint(testString, char , sep = "")
 }
