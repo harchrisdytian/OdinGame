@@ -152,7 +152,7 @@ recurse_nodes :: proc(node: ^cgltf.node, textRefs: ^map[^cgltf.texture]u32) -> [
 
 				for i := 0; i < (len(float_data)); i += 3 {
 
-					Value.vertices[i / 3].position =  {
+					Value.vertices[i / 3].position = {
 						float_data[i],
 						float_data[i + 1],
 						float_data[i + 2],
@@ -161,7 +161,7 @@ recurse_nodes :: proc(node: ^cgltf.node, textRefs: ^map[^cgltf.texture]u32) -> [
 			}
 			if (attribute.type == cgltf.attribute_type.normal) {
 				for i := 0; i < (len(float_data)); i += 3 {
-					Value.vertices[i / 3].normal =  {
+					Value.vertices[i / 3].normal = {
 						float_data[i],
 						float_data[i + 1],
 						float_data[i + 2],
@@ -401,7 +401,7 @@ draw_scene :: proc(
 	for i in scene.models {
 
 		//fmt.print(i.mat)
-		mod :=  scene.transform * i.mat
+		mod := scene.transform * i.mat
 
 		//posit = {0.0,0.0,3.0}
 		posit := camera.position
@@ -421,22 +421,22 @@ draw_scene :: proc(
 		shader.projection = UniformValue_make(shader.mProgram, "projection", projection)
 		shader.model = UniformValue_make(shader.mProgram, "model", mod)
 
-		UniformValue_set( shader.view)
-		UniformValue_set( shader.projection)
-		UniformValue_set( shader.viewPos)
-		UniformValue_set( shader.model)
-		UniformValue_set( shader.mLight.ambient)
-		UniformValue_set( shader.mLight.specular)
-		UniformValue_set( shader.mLight.diffuse)
-		UniformValue_set( shader.mLight.linear)
-		UniformValue_set( shader.mLight.constant)
-		UniformValue_set( shader.mLight.quadratic)
-		UniformValue_set( shader.mLight.cutOff)
-		UniformValue_set( shader.mLight.direction)
-		UniformValue_set( shader.mLight.position)
-		UniformValue_set( shader.mMaterial.shininess)
-		UniformValue_set( shader.mMaterial.diffuse)
-		UniformValue_set( shader.mMaterial.specular)
+		UniformValue_set(shader.view)
+		UniformValue_set(shader.projection)
+		UniformValue_set(shader.viewPos)
+		UniformValue_set(shader.model)
+		UniformValue_set(shader.mLight.ambient)
+		UniformValue_set(shader.mLight.specular)
+		UniformValue_set(shader.mLight.diffuse)
+		UniformValue_set(shader.mLight.linear)
+		UniformValue_set(shader.mLight.constant)
+		UniformValue_set(shader.mLight.quadratic)
+		UniformValue_set(shader.mLight.cutOff)
+		UniformValue_set(shader.mLight.direction)
+		UniformValue_set(shader.mLight.position)
+		UniformValue_set(shader.mMaterial.shininess)
+		UniformValue_set(shader.mMaterial.diffuse)
+		UniformValue_set(shader.mMaterial.specular)
 
 		gl.ActiveTexture(gl.TEXTURE0)
 		gl.BindTexture(gl.TEXTURE_2D, i.textures)
@@ -444,7 +444,7 @@ draw_scene :: proc(
 		gl.BindTexture(gl.TEXTURE_2D, i.textures)
 		gl.BindVertexArray(i.buffer.VAO)
 		gl.DrawElements(gl.TRIANGLES, i32(len(i.indicies)), gl.UNSIGNED_INT, nil)
-		
+
 
 	}
 }

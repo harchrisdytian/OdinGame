@@ -6,7 +6,7 @@ import "vendor:glfw"
 // import ""
 import gl "vendor:OpenGL"
 import stb "vendor:stb/image"
-
+import vk "vendor:vulkan"
 import math "core:math/linalg"
 import glm "core:math/linalg/glsl"
 
@@ -52,11 +52,33 @@ BaseCube : Scene
 BaseArch : Scene
 ter :terrain
 
+SWAP_FRAMES :: 2
+
+
 init :: proc() -> glfw.WindowHandle {
 	   //coral = {1.0,0.5,0.31}
 		   
-	   
-	   cam.position = {0.0, 0.0, 3.0}
+	   if(glfw.VulkanSupported()){
+		glfw.WindowHint(glfw.CLIENT_API,glfw.NO_API)
+		glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE)
+		appInfo : vk.ApplicationInfo
+		appInfo.sType = vk.StructureType.APPLICATION_INFO
+		appInfo.apiVersion = vk.API_VERSION_1_3
+		appInfo.pEngineName = "hardy engine"
+		appInfo.engineVersion = vk.MAKE_VERSION(0,0,1)
+		appInfo.applicationVersion = vk.MAKE_VERSION(0,0,1)
+		
+	
+		createInfo : vk.InstanceCreateInfo
+		createInfo.sType =vk.StructureType.INSTANCE_CREATE_INFO
+		createInfo.pApplicationInfo = &appInfo
+		instance :vk.Instance	
+		vk.CreateInstance(&createInfo, nil ,&instance) 
+
+	}
+	   else
+	{
+	//   cam.position = {0.0, 0.0, 3.0}
 	   cam.worldUp = {0.0, 1.0, 0.0}
 	   
 	   cam.front = {0.0, 0.0, -1.0}
@@ -67,7 +89,7 @@ init :: proc() -> glfw.WindowHandle {
 	   glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
 	   glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 6)
 	   glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-	   
+		
 	   // intialize glfw
 	   if (glfw.Init() != b32(true)) {
 		   
@@ -235,7 +257,7 @@ init :: proc() -> glfw.WindowHandle {
 	gui_init()
 	
 	return window
-
+	}
 
 }
 
@@ -244,6 +266,7 @@ end :: proc(window: glfw.WindowHandle) {
 	//gl.DeleteProgram()
 	glfw.DestroyWindow(window)
 	glfw.Terminate()
+
 }
 
 update :: proc() {

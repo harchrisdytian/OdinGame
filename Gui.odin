@@ -6,20 +6,20 @@ import "core:fmt"
 import gl "vendor:OpenGL"
 import glm "core:math/linalg/glsl"
 import math "core:math/linalg"
-import "core:runtime"
+import "base:runtime"
 import "core:unicode/utf8"
 import "core:os"
 import "core:bytes"
 import "core:strings"
 import "vendor:stb/truetype"
-
 GUI_charAmount::96
 GUI_Command_size:: 1<<12
+DEFAULT_COLOR :glm.vec3:{0.5,0.5,0.55}
+
 GUI_data :: struct{
     state: GUI_state,
     imageData:[1<<23 ]byte,
     charData:[1<<23]truetype.bakedchar,
-    commands: [GUI_Command_size]GUI_RenderCommand,
     packedChar:[GUI_charAmount]truetype.packedchar,
     img : u32,
     projection: glm.mat4,
@@ -39,21 +39,13 @@ GUI_rectangle ::struct{
 guiWidth:i32
 guiHeight:i32
 testString : string
-
+fontInfo :truetype.fontinfo
 GUI_state::struct{
     isInDebugMode: bool,
 }
 
-GUI_RenderCommandTypes:: enum{
-    none,
-    rectangle
-}
-GUI_RenderCommand:: struct{
-    command: GUI_RenderCommandTypes,
-    size: glm.vec2,
-    position:glm.vec2,
-    text: string
-}
+
+
 tempLetter :i32 = 32
 GUI : GUI_data
 // Sets up the initial data after calling openGl stuff
@@ -83,7 +75,7 @@ gui_init :: proc(){
         fmt.print("failed to load font shader")
     }
 
-    fontInfo :truetype.fontinfo
+
     fontContext :truetype.pack_context
 
 
@@ -92,7 +84,7 @@ gui_init :: proc(){
      }
      //beb := truetype.BakeFontBitmap( &fontData[0],0,32,&GUI.imageData[0],512,512,32,96,&GUI.charData[0])
     truetype.PackBegin(&fontContext,&GUI.imageData[0],512,512,0,1,nil)
-    truetype.PackFontRange(&fontContext,&fontData[0],0, f32(truetype.POINT_SIZE(12.0)),32,GUI_charAmount,&GUI.packedChar[0])
+    truetype.PackFontRange(&fontContext,&fontData[0],0, f32(truetype.POINT_SIZE(18.0)),32,GUI_charAmount,&GUI.packedChar[0])
     truetype.PackEnd(&fontContext)
      //fmt.print(beb)
      GUI_SetupFontTexture( )
@@ -121,7 +113,6 @@ gui_init :: proc(){
 gui_render ::proc()
 {
      GUI_Render()
-
 }
 
 GUI_hover::proc(mousePos:glm.vec2,topLeft :glm.vec2,bottomRight:glm.vec2)->bool{
@@ -133,19 +124,24 @@ GUI_hover::proc(mousePos:glm.vec2,topLeft :glm.vec2,bottomRight:glm.vec2)->bool{
     return false
 }
 
+GUI_TextBox:: proc(label: string, position:glm.vec2,size:glm.vec2, color :glm.vec3= DEFAULT_COLOR)
+{
+    GUI_drawRect(position,size,color)
+}
+
 GUI_Button:: proc(label : string, position:glm.vec2, size:f32 ) -> bool
 {
     if GUI_hover(glm.vec2{lastXpos,lastYpos},position - glm.vec2{10,10}, (position - glm.vec2{20,20}) + glm.vec2{200,25})
     {
         if glfw.GetMouseButton(window,glfw.MOUSE_BUTTON_LEFT) != glfw.RELEASE
         {
-            GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25},glm.vec3{0.6,0.6,0.6})
+            GUI_drawRect(position ,glm.vec2{200,25},glm.vec3{0.6,0.6,0.6})
             GUI_DrawText(label, position,size)
             return true
         }
         else
         {
-            GUI_drawRect(position - glm.vec2{10,10},glm.vec2{200,25},glm.vec3{1.6,0.6,0.6})
+            GUI_drawRect(position ,glm.vec2{200,25},glm.vec3{1.6,0.6,0.6})
         }
 
     }else{
@@ -189,15 +185,24 @@ GUI_drawRect:: proc( rectPos:glm.vec2, size:glm.vec2, color :glm.vec3= {0.5,0.5,
         gl.DrawArrays(gl.TRIANGLE_STRIP,0,i32(len(RectVerts)/2))
     }
 }
+GUI_GetFontWidth::proc(text:string)
+{
+
+        acent,decent:i32
+        linggap:i32
+        truetype.GetFontVMetrics(&fontInfo,&acent,&decent,&linggap)
+
+}
 //draws text given as string and position
-GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32)
+GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32) -> (BoxSize :glm.vec2)
 {
     tX,tY: f32
     quad: truetype.aligned_quad
-
+    BoxSize = {0,0}
     maxX :f32= 0
     maxY :f32= 0
-    CurPosX, CurPosY : = glfw.GetCursorPos(window)
+
+
     for char,index in text
     {
 
@@ -216,11 +221,11 @@ GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32)
             maxY = yPos + quad.y1 + size
         }
 
-        CharVerts :[]f32= {  //pos                      //uv
-            xPos + quad.x0       ,yPos + quad.y0       , quad.s0,quad.t0,
-            xPos + quad.x1 + size,yPos + quad.y0       , quad.s1,quad.t0,
-            xPos + quad.x0       ,yPos + quad.y1 + size, quad.s0,quad.t1,
-            xPos + quad.x1 + size,yPos + quad.y1 + size, quad.s1,quad.t1,
+        CharVerts :[]f32= {  //pos          //uv
+            xPos + quad.x0,yPos + quad.y0 , quad.s0,quad.t0,
+            xPos + quad.x1,yPos + quad.y0 , quad.s1,quad.t0,
+            xPos + quad.x0,yPos + quad.y1 , quad.s0,quad.t1,
+            xPos + quad.x1,yPos + quad.y1 , quad.s1,quad.t1,
         }
 
         textColor := glm.vec3{1.0,1.0,1.0}
@@ -247,6 +252,7 @@ GUI_DrawText:: proc(text :string, textPos:glm.vec2,size:f32)
             gl.DrawArrays(gl.TRIANGLE_STRIP,0,i32(len(CharVerts)/4))
         }
     }
+    return BoxSize
 }
 
 GUI_Render :: proc(){
@@ -271,25 +277,9 @@ GUI_SetupFontTexture::proc(){
     gl.BindTexture(gl.TEXTURE_2D,GUI.img)
     gl.TexImage2D(gl.TEXTURE_2D,0,gl.RED,512,512,0,gl.RED, gl.UNSIGNED_BYTE,rawptr(&GUI.imageData[0]))
     gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-
 }
 
-GUI_draw ::proc(commands : []GUI_RenderCommand){
-    for i in commands
-    {
-        switch  i.command
-        {
-            case .none:
-                GUI_DrawText(i.text, i.position,18)
-            case .rectangle:
-                GUI_drawRect(i.position, i.size,{0.3,0.3,0.3})
-                if i.text != ""
-                {
-                    GUI_DrawText(i.text, i.position,18)
-                }
-        }
-    }
-}
+
 GUI_charCallBack::proc "c" (window: glfw.WindowHandle, char: rune){
 
     context = runtime.default_context()
