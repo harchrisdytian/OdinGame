@@ -54,211 +54,291 @@ ter :terrain
 
 SWAP_FRAMES :: 2
 
-
-init :: proc() -> glfw.WindowHandle {
-	   //coral = {1.0,0.5,0.31}
-		   
-	   if(glfw.VulkanSupported()){
-		glfw.WindowHint(glfw.CLIENT_API,glfw.NO_API)
-		glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE)
-		appInfo : vk.ApplicationInfo
-		appInfo.sType = vk.StructureType.APPLICATION_INFO
-		appInfo.apiVersion = vk.API_VERSION_1_3
-		appInfo.pEngineName = "hardy engine"
-		appInfo.engineVersion = vk.MAKE_VERSION(0,0,1)
-		appInfo.applicationVersion = vk.MAKE_VERSION(0,0,1)
-		
+GAME_TITLE :: "The Projector"
+DEFAULT_WIDTH :: 800
+DEFAULT_HEIGHT :: 600
+// Vulkan Type Defines
+v_appInfo : vk.ApplicationInfo
+v_createInfo : vk.InstanceCreateInfo
+v_instance :vk.Instance
+v_physicalDevice : vk.PhysicalDevice
+v_device : vk.Device
+VALIDATION_lAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation"};
+init :: proc() -> glfw.WindowHandle
+{
+    if(glfw.Init() && glfw.VulkanSupported()){
+	glfw.WindowHint(glfw.CLIENT_API,glfw.NO_API)
+	glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE)
 	
-		createInfo : vk.InstanceCreateInfo
-		createInfo.sType =vk.StructureType.INSTANCE_CREATE_INFO
-		createInfo.pApplicationInfo = &appInfo
-		instance :vk.Instance	
-		vk.CreateInstance(&createInfo, nil ,&instance) 
+	v_appInfo.sType = vk.StructureType.APPLICATION_INFO
+	v_appInfo.apiVersion = vk.API_VERSION_1_0
+	v_appInfo.pEngineName = "hardy engine"
+	v_appInfo.engineVersion = vk.MAKE_VERSION(0,0,1)
+	v_appInfo.applicationVersion = vk.MAKE_VERSION(0,0,1)
+	
+	v_createInfo.sType =vk.StructureType.INSTANCE_CREATE_INFO
+	v_createInfo.pApplicationInfo = &v_appInfo
+	glfwExt := glfw.GetRequiredInstanceExtensions()
+	
+	v_createInfo.ppEnabledExtensionNames = raw_data(glfwExt)
+	v_createInfo.enabledLayerCount = cast(u32)len(glfwExt)
+	monitor := glfw.GetVideoMode(glfw.GetPrimaryMonitor())
+	window = glfw.CreateWindow(DEFAULT_WIDTH,DEFAULT_HEIGHT,GAME_TITLE, glfw.GetPrimaryMonitor() ,nil)
+	
 
+	// initilze vulkan
+	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
+	assert(vk.CreateInstance != nil, "vulkan function pointers not loaded")	// enableing vulkan debuggin 
+
+	when ODIN_DEBUG
+	{
+	    layerCount : u32
+	    vk.EnumerateInstanceLayerProperties(&layerCount,nil)
+	    layers := make([]vk.LayerProperties, layerCount)
+	    vk.EnumerateInstanceLayerProperties(&layerCount,raw_data(layers))
+	    
+	    check := false
+	    for name in VALIDATION_lAYERS
+	    {
+		for layer in layers
+	        {
+		    NamedLayer := layer.layerName
+		    if name == cstring(raw_data(NamedLayer[:]))
+		    {
+			check = true
+			fmt.print("found")
+		    }
+		}
+	        if( !check )
+		{
+			fmt.eprint("ERROR: validation line not available: ", name)
+	        }
+			//os.exit(1)
+		
+	    }
+	    v_createInfo.ppEnabledLayerNames = &VALIDATION_lAYERS[0]
+	    v_createInfo.enabledLayerCount = len(VALIDATION_lAYERS)
 	}
-	   else
+	else
+	{
+	    v_createInfo.enabledLayerCount = 0
+	}
+
+	if(vk.CreateInstance(&v_createInfo, nil ,&v_instance) != vk.Result.SUCCESS){
+	    fmt.eprint("ERROR: failed to create instance")
+	}
+	
+	count : u32
+	vk.load_proc_addresses_instance(v_instance)
+	vk.load_proc_addresses_device(v_device)
+	
+	if(vk.EnumeratePhysicalDevices(v_instance,&count,nil)!= vk.Result.SUCCESS){
+	    fmt.eprint("ERROR: can't enummerate the physical device")
+	}
+	
+	if(count == 0){
+	    fmt.eprint("ERROR: there is no physical device")
+	}
+
+	v_physicalDevices := make([]vk.PhysicalDevice, count)
+	vk.EnumeratePhysicalDevices(v_instance,&count,&v_physicalDevices[0])	
+	
+	v_physicalDevice = v_physicalDevices[0]
+	fmt.print(v_physicalDevice)
+	when ODIN_DEBUG {
+	    deviceProperties : vk.PhysicalDeviceProperties
+	    vk.GetPhysicalDeviceProperties(v_physicalDevice, &deviceProperties)
+	}
+	deviceCreateInfo : vk.DeviceCreateInfo
+	deviceCreateInfo.sType = vk.StructureType.DEVICE_CREATE_INFO
+	deviceCreateInfo.pNext = nil // next pointer to a different device 
+
+	
+    
+    }
+    else
 	{
 	//   cam.position = {0.0, 0.0, 3.0}
-	   cam.worldUp = {0.0, 1.0, 0.0}
-	   
-	   cam.front = {0.0, 0.0, -1.0}
-	   cam.yaw = -90.0
-	 	lightPos = {-1.2,1.0,2.0}  
-	   //do proc stuff
-	   glfw.WindowHint(glfw.RESIZABLE, 1)
-	   glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
-	   glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 6)
-	   glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-		
-	   // intialize glfw
-	   if (glfw.Init() != b32(true)) {
-		   
-		   fmt.println("glfw fail to init")
-		   return nil
-		}
-		
-		_vidMode :^glfw.VidMode=glfw.GetVideoMode(glfw.GetPrimaryMonitor())
-		glfw.WindowHint(glfw.RED_BITS,_vidMode.red_bits)
-		glfw.WindowHint(glfw.GREEN_BITS,_vidMode.green_bits)
-		glfw.WindowHint(glfw.BLUE_BITS,_vidMode.blue_bits)
-		glfw.WindowHint(glfw.REFRESH_RATE,_vidMode.refresh_rate)	
-		window = glfw.CreateWindow(_vidMode.width, _vidMode.height, "something", glfw.GetPrimaryMonitor(), nil)
-		
-		glfw.MakeContextCurrent(window)
-		glfw.SwapInterval(1)
-		glfw.SetFramebufferSizeCallback(window, size_callback)
-		glfw.SetKeyCallback(window, key_callback)
-		gl.load_up_to(4, 6, glfw.gl_set_proc_address)
-		gl.Enable(gl.DEPTH_TEST)
-		size_callback(window,_vidMode.width,_vidMode.height)
-		
-		glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED);
-		glfw.SetCharCallback(window,GUI_charCallBack)
-		//fmt.println(give_output())
-		
-		//test_model.models= ModelCreatePath("Models/survival_guitar_backpack.glb")
-		test_model.models= ModelCreatePath("Models/baseCube.glb")
-		BaseCube.models =  ModelCreatePath("Models/unitbox.glb")
-		BaseArch.models =  ModelCreatePath("Models/survival_guitar_backpack.glb")
-		//fmt.print(BaseArch)
-		//fmt.print(BaseArch)
-		
-		test_model.transform = glm.mat4Scale({1,1,1}) *0.01
-		BaseArch.transform = glm.mat4Scale({1,1,1})
-		BaseCube.transform = glm.mat4Scale({1,1,1})
-		//test_model.transform = glm.mat4Translate({0.2,2,0.4})
-		// for &i in test_model.models{
-			// 	setupMesh(&i)
-			// }
-			
-			ter = make_terrain("HeightMaps/hightmap.png")
-			setup_scene(&test_model)
-			setup_scene(&BaseCube)
-			setup_scene(&BaseArch)
-		
+	//    cam.worldUp = {0.0, 1.0, 0.0}
 
-		program, shader_worked = gl.load_shaders("Shaders/shader1.vert", "Shaders/shader1.frag")
-		gl.UseProgram(program)
-		if (!shader_worked) {
-			fmt.print("reg shader didn't work")
-		}
-		lightProgram, shader_worked = gl.load_shaders("Shaders/shader2.vert", "Shaders/shader2.frag")
-		if(!shader_worked){
-			fmt.print("light shder")
-		}
+	//    cam.front = {0.0, 0.0, -1.0}
+	//    cam.yaw = -90.0
+	//  	lightPos = {-1.2,1.0,2.0}
+	//    //do proc stuff
+	//    glfw.WindowHint(glfw.RESIZABLE, 1)
+	//    glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
+	//    glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 6)
+	//    glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 
-	vert_data := [?] f32 { 
-		-0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
-		0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
-		0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
-		0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
-	   -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,
-	   -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
-   
-	   -0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 0.0,
-		0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 0.0,
-		0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 1.0,
-		0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 1.0,
-	   -0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 1.0,
-	   -0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 0.0,
-   
-	   -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
-	   -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  1.0, 1.0,
-	   -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
-	   -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
-	   -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  0.0, 0.0,
-	   -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
-   
-		0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
-		0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,
-		0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
-		0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
-		0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,
-		0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
-   
-	   -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
-		0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 1.0,
-		0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
-		0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
-	   -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 0.0,
-	   -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
-   
-	   -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,
-		0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,
-		0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
-		0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
-	   -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,
-	   -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0} // top let 
+	//    // intialize glfw
+	//    if (glfw.Init() != b32(true)) {
 
-	
-	gl.GenVertexArrays(1, &vao)
+	// 	   fmt.println("glfw fail to init")
+	// 	   return nil
+	// 	}
 
-	gl.GenBuffers(1, &vbo)
-	// gl.GenBuffers(1,&ebo)
+	// 	_vidMode :^glfw.VidMode=glfw.GetVideoMode(glfw.GetPrimaryMonitor())
+	// 	glfw.WindowHint(glfw.RED_BITS,_vidMode.red_bits)
+	// 	glfw.WindowHint(glfw.GREEN_BITS,_vidMode.green_bits)
+	// 	glfw.WindowHint(glfw.BLUE_BITS,_vidMode.blue_bits)
+	// 	glfw.WindowHint(glfw.REFRESH_RATE,_vidMode.refresh_rate)
+	// 	window = glfw.CreateWindow(_vidMode.width, _vidMode.height, "something", glfw.GetPrimaryMonitor(), nil)
 
-	gl.BindVertexArray(vao)
+	// 	glfw.MakeContextCurrent(window)
+	// 	glfw.SwapInterval(1)
+	// 	glfw.SetFramebufferSizeCallback(window, size_callback)
+	// 	glfw.SetKeyCallback(window, key_callback)
+	// 	gl.load_up_to(4, 6, glfw.gl_set_proc_address)
+	// 	gl.Enable(gl.DEPTH_TEST)
+	// 	size_callback(window,_vidMode.width,_vidMode.height)
 
-	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-	gl.BufferData(gl.ARRAY_BUFFER, size_of(vert_data), &vert_data[0], gl.STATIC_DRAW)
+	// 	glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED);
+	// 	glfw.SetCharCallback(window,GUI_charCallBack)
+	// 	//fmt.println(give_output())
+
+	// 	//test_model.models= ModelCreatePath("Models/survival_guitar_backpack.glb")
+	// 	test_model.models= ModelCreatePath("Models/baseCube.glb")
+	// 	BaseCube.models =  ModelCreatePath("Models/unitbox.glb")
+	// 	BaseArch.models =  ModelCreatePath("Models/survival_guitar_backpack.glb")
+	// 	//fmt.print(BaseArch)
+	// 	//fmt.print(BaseArch)
+
+	// 	test_model.transform = glm.mat4Scale({1,1,1}) *0.01
+	// 	BaseArch.transform = glm.mat4Scale({1,1,1})
+	// 	BaseCube.transform = glm.mat4Scale({1,1,1})
+	// 	//test_model.transform = glm.mat4Translate({0.2,2,0.4})
+	// 	// for &i in test_model.models{
+	// 		// 	setupMesh(&i)
+	// 		// }
+
+	// 		ter = make_terrain("HeightMaps/hightmap.png")
+	// 		setup_scene(&test_model)
+	// 		setup_scene(&BaseCube)
+	// 		setup_scene(&BaseArch)
 
 
-	gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 0)
-	gl.EnableVertexAttribArray(0)
-	gl.VertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 3 * size_of(f32))
-	gl.EnableVertexAttribArray(1)	
-	gl.VertexAttribPointer(2, 2, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 6 * size_of(f32))
-	gl.EnableVertexAttribArray(2)
-	
-	gl.GenVertexArrays(1, &lightVao)
-	gl.BindVertexArray(lightVao)
+	// 	program, shader_worked = gl.load_shaders("Shaders/shader1.vert", "Shaders/shader1.frag")
+	// 	gl.UseProgram(program)
+	// 	if (!shader_worked) {
+	// 		fmt.print("reg shader didn't work")
+	// 	}
+	// 	lightProgram, shader_worked = gl.load_shaders("Shaders/shader2.vert", "Shaders/shader2.frag")
+	// 	if(!shader_worked){
+	// 		fmt.print("light shder")
+	// 	}
 
-	gl.BindBuffer(gl.ARRAY_BUFFER,vbo)
-	gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 0)
-	gl.EnableVertexAttribArray(0)
-	
-	gl.VertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 3 * size_of(f32))
-	gl.EnableVertexAttribArray(1)	
-	gl.VertexAttribPointer(2, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 6 * size_of(f32))
-	gl.EnableVertexAttribArray(2)	
+	// vert_data := [?] f32 {
+	// 	-0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
+	// 	0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
+	// 	0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
+	// 	0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
+	//    -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,
+	//    -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
 
-	//color
-	texture1 = load_texture("C:/Users/christian hardy/OdinGame/Textures/container2.png")
-	fmt.print(texture1)
-	texture2 = load_texture("C:/Users/christian hardy/OdinGame/Textures/container2_specular.png")
-	//gl.EnableVertexAttribArray(1)
-	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+	//    -0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 0.0,
+	// 	0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 0.0,
+	// 	0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 1.0,
+	// 	0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 1.0,
+	//    -0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 1.0,
+	//    -0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 0.0,
 
-	gl.BindVertexArray(0)
-	gl.BindVertexArray(vao)
-	gl.UseProgram(lightProgram)
-	gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.diffuse"), 0)
-	gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.specular"), 1)
+	//    -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
+	//    -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  1.0, 1.0,
+	//    -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
+	//    -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
+	//    -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  0.0, 0.0,
+	//    -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
 
-	position = 1
+	// 	0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
+	// 	0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,
+	// 	0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
+	// 	0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
+	// 	0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,
+	// 	0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
 
-	//stb.image_free(data)
-	model = 1
-	view = 1
-	projection = 1
-	projection = glm.mat4Perspective(f32(math.to_radians(45.0)), 512 / 512, 0.1, 1000)
-	model *= glm.mat4Rotate({1, 0.5, 0}, f32(math.to_radians(glfw.GetTime() * 45.0)))
-	view = CameraViewMatrix(cam)
+	//    -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
+	// 	0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 1.0,
+	// 	0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
+	// 	0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
+	//    -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 0.0,
+	//    -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
 
-	modelLoc = gl.GetUniformLocation(program, "model")
-	viewLoc = gl.GetUniformLocation(program, "view")
-	projectionLoc = gl.GetUniformLocation(program, "projection")
+	//    -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,
+	// 	0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,
+	// 	0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
+	// 	0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
+	//    -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,
+	//    -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0} // top let
 
-	gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
-	gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
-	gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
 
-	glfw.SetCursorPosCallback(window, mouse_callback)
-	
-	gui_init()
-	
-	return window
+	// gl.GenVertexArrays(1, &vao)
+
+	// gl.GenBuffers(1, &vbo)
+	// // gl.GenBuffers(1,&ebo)
+
+	// gl.BindVertexArray(vao)
+
+	// gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+	// gl.BufferData(gl.ARRAY_BUFFER, size_of(vert_data), &vert_data[0], gl.STATIC_DRAW)
+
+
+	// gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 0)
+	// gl.EnableVertexAttribArray(0)
+	// gl.VertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 3 * size_of(f32))
+	// gl.EnableVertexAttribArray(1)
+	// gl.VertexAttribPointer(2, 2, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 6 * size_of(f32))
+	// gl.EnableVertexAttribArray(2)
+
+	// gl.GenVertexArrays(1, &lightVao)
+	// gl.BindVertexArray(lightVao)
+
+	// gl.BindBuffer(gl.ARRAY_BUFFER,vbo)
+	// gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 0)
+	// gl.EnableVertexAttribArray(0)
+
+	// gl.VertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 3 * size_of(f32))
+	// gl.EnableVertexAttribArray(1)
+	// gl.VertexAttribPointer(2, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 6 * size_of(f32))
+	// gl.EnableVertexAttribArray(2)
+
+	// //color
+	// texture1 = load_texture("C:/Users/christian hardy/OdinGame/Textures/container2.png")
+	// fmt.print(texture1)
+	// texture2 = load_texture("C:/Users/christian hardy/OdinGame/Textures/container2_specular.png")
+	// //gl.EnableVertexAttribArray(1)
+	// gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+
+	// gl.BindVertexArray(0)
+	// gl.BindVertexArray(vao)
+	// gl.UseProgram(lightProgram)
+	// gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.diffuse"), 0)
+	// gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.specular"), 1)
+
+	// position = 1
+
+	// //stb.image_free(data)
+	// model = 1
+	// view = 1
+	// projection = 1
+	// projection = glm.mat4Perspective(f32(math.to_radians(45.0)), 512 / 512, 0.1, 1000)
+	// model *= glm.mat4Rotate({1, 0.5, 0}, f32(math.to_radians(glfw.GetTime() * 45.0)))
+	// view = CameraViewMatrix(cam)
+
+	// modelLoc = gl.GetUniformLocation(program, "model")
+	// viewLoc = gl.GetUniformLocation(program, "view")
+	// projectionLoc = gl.GetUniformLocation(program, "projection")
+
+	// gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
+	// gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
+	// gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
+
+	// glfw.SetCursorPosCallback(window, mouse_callback)
+
+	// gui_init()
+
+	// return window
 	}
-
+	return nil
 }
 
 end :: proc(window: glfw.WindowHandle) {
@@ -270,129 +350,137 @@ end :: proc(window: glfw.WindowHandle) {
 }
 
 update :: proc() {
-    if GUI.state.isInDebugMode 
+    if GUI.state.isInDebugMode
 	{
-		return 
+		return
 	}
+
     currentFrame = f32(glfw.GetTime())
     deltaTime = currentFrame - lastFrame
     lastFrame = currentFrame
 	key := glfw.GetKey(window, glfw.KEY_W)
     movSpeed := 19.5 * deltaTime
+    return;
 
-	if (glfw.GetKey(window, glfw.KEY_W) == glfw.PRESS ||
-		   glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS) {
-		CameraProcessMovement(&cam, .UP,movSpeed)
-	}
-	if (glfw.GetKey(window, glfw.KEY_D) == glfw.PRESS ||
-		   glfw.GetKey(window, glfw.KEY_RIGHT) == glfw.PRESS) {
-		CameraProcessMovement(&cam, .RIGHT, movSpeed)
-	}
-	if (glfw.GetKey(window, glfw.KEY_A) == glfw.PRESS ||
-		   glfw.GetKey(window, glfw.KEY_LEFT) == glfw.PRESS) {
-		CameraProcessMovement(&cam, .LEFT, movSpeed)
-	}
-	if (glfw.GetKey(window, glfw.KEY_S) ==
-		   glfw.PRESS || glfw.GetKey(window, glfw.KEY_DOWN) ==
-		   glfw.PRESS) {
-		CameraProcessMovement(&cam, .DOWN, movSpeed)
-	}
-	if (glfw.GetKey(window,glfw.KEY_SPACE) == glfw.PRESS ) {
-		CameraProcessMovement(&cam, .SPACE, movSpeed)
+    // TODO: replace with the same things
 
-	}
+	// if (glfw.GetKey(window, glfw.KEY_W) == glfw.PRESS ||
+	// 	   glfw.GetKey(window, glfw.KEY_UP) == glfw.PRESS) {
+	// 	CameraProcessMovement(&cam, .UP,movSpeed)
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_D) == glfw.PRESS ||
+	// 	   glfw.GetKey(window, glfw.KEY_RIGHT) == glfw.PRESS) {
+	// 	CameraProcessMovement(&cam, .RIGHT, movSpeed)
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_A) == glfw.PRESS ||
+	// 	   glfw.GetKey(window, glfw.KEY_LEFT) == glfw.PRESS) {
+	// 	CameraProcessMovement(&cam, .LEFT, movSpeed)
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_S) ==
+	// 	   glfw.PRESS || glfw.GetKey(window, glfw.KEY_DOWN) ==
+	// 	   glfw.PRESS) {
+	// 	CameraProcessMovement(&cam, .DOWN, movSpeed)
+	// }
+	// if (glfw.GetKey(window,glfw.KEY_SPACE) == glfw.PRESS ) {
+	// 	CameraProcessMovement(&cam, .SPACE, movSpeed)
 
-	tempSpeed :f32=1.9
-	if (glfw.GetKey(window, glfw.KEY_I) == glfw.PRESS ) {
-		spotA.y += tempSpeed * deltaTime
-	} 
-	if (glfw.GetKey(window, glfw.KEY_K) == glfw.PRESS ) {
-		spotA.y -= tempSpeed * deltaTime
-	}if (glfw.GetKey(window, glfw.KEY_J) == glfw.PRESS ) {
-		spotA.x += tempSpeed * deltaTime
-	} 
-	if (glfw.GetKey(window, glfw.KEY_L) == glfw.PRESS ) {
-		spotA.x -= tempSpeed * deltaTime
-	}if (glfw.GetKey(window, glfw.KEY_U) == glfw.PRESS ) {
-		spotA.z += tempSpeed * deltaTime
-	} 
-	if (glfw.GetKey(window, glfw.KEY_O) == glfw.PRESS ) {
-		spotA.z -= tempSpeed * deltaTime
-	}
-	//spotb
-	if (glfw.GetKey(window, glfw.KEY_T) == glfw.PRESS ) {
-		spotB.y += tempSpeed * deltaTime
-	} 
-	if (glfw.GetKey(window, glfw.KEY_G) == glfw.PRESS ) {
-		spotB.y -= tempSpeed * deltaTime
-	}if (glfw.GetKey(window, glfw.KEY_F) == glfw.PRESS ) {
-		spotB.x += tempSpeed * deltaTime
-	} 
-	if (glfw.GetKey(window, glfw.KEY_H) == glfw.PRESS ) {
-		spotB.z -= tempSpeed * deltaTime
-	}if (glfw.GetKey(window, glfw.KEY_R) == glfw.PRESS ) {
-		spotB.z += tempSpeed * deltaTime
-	} 
-	if (glfw.GetKey(window, glfw.KEY_Y) == glfw.PRESS ) {
-		spotB.z -= tempSpeed * deltaTime
-	}
+	// }
+
+	// tempSpeed :f32=1.9
+	// if (glfw.GetKey(window, glfw.KEY_I) == glfw.PRESS ) {
+	// 	spotA.y += tempSpeed * deltaTime
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_K) == glfw.PRESS ) {
+	// 	spotA.y -= tempSpeed * deltaTime
+	// }if (glfw.GetKey(window, glfw.KEY_J) == glfw.PRESS ) {
+	// 	spotA.x += tempSpeed * deltaTime
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_L) == glfw.PRESS ) {
+	// 	spotA.x -= tempSpeed * deltaTime
+	// }if (glfw.GetKey(window, glfw.KEY_U) == glfw.PRESS ) {
+	// 	spotA.z += tempSpeed * deltaTime
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_O) == glfw.PRESS ) {
+	// 	spotA.z -= tempSpeed * deltaTime
+	// }
+	// //spotb
+	// if (glfw.GetKey(window, glfw.KEY_T) == glfw.PRESS ) {
+	// 	spotB.y += tempSpeed * deltaTime
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_G) == glfw.PRESS ) {
+	// 	spotB.y -= tempSpeed * deltaTime
+	// }if (glfw.GetKey(window, glfw.KEY_F) == glfw.PRESS ) {
+	// 	spotB.x += tempSpeed * deltaTime
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_H) == glfw.PRESS ) {
+	// 	spotB.z -= tempSpeed * deltaTime
+	// }if (glfw.GetKey(window, glfw.KEY_R) == glfw.PRESS ) {
+	// 	spotB.z += tempSpeed * deltaTime
+	// }
+	// if (glfw.GetKey(window, glfw.KEY_Y) == glfw.PRESS ) {
+	// 	spotB.z -= tempSpeed * deltaTime
+	// }
 }
 
 
 draw :: proc() {
-	gl.ClearColor(0.2, 0.3, 0.3, 1.)
-	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-	lightPos.x = 1.0 + f32(math.sin(glfw.GetTime()*2.0))
-	lightPos.y = f32(math.sin((glfw.GetTime()/2.0))) * 1.0 
 
-	gl.UseProgram(lightProgram)
-	shadder :Shadder
-	shadder.mProgram = lightProgram
-	
-	//draw_scene(test_model,&shadder,lightPos,cam,view,projection)
-	//test_model.transform *= glm.mat4Scale({1,1,1})
- 
-	//new_m := test_model
-	//new_m.transform += glm.mat4Translate(position)
-	//position.x += 0.07 * deltaTime
-	//draw_scene(new_m,&shadder,lightPos,cam,view,projection)
-	
-	MainLevel(&shadder,lightPos,cam,view,projection,&ter)
+    return
+    //TODO replace with the same shit
+ //    gl.ClearColor(0.2, 0.3, 0.3, 1.)
+	// gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-	gl.UseProgram(program)
+	// lightPos.x = 1.0 + f32(math.sin(glfw.GetTime()*2.0))
+	// lightPos.y = f32(math.sin((glfw.GetTime()/2.0))) * 1.0
 
-	model = 1.0
-	model *= glm.mat4Translate(lightPos)
-	scale : glm.vec3=0.3
-	//model *= glm.mat4Scale(scale)
-	view = CameraViewMatrix(cam)
-	gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
-	gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
-	gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
+	// gl.UseProgram(lightProgram)
+	// shadder :Shadder
+	// shadder.mProgram = lightProgram
 
-	gl.BindVertexArray(vao)
+	// //draw_scene(test_model,&shadder,lightPos,cam,view,projection)
+	// //test_model.transform *= glm.mat4Scale({1,1,1})
 
-	gl.DrawArrays(gl.TRIANGLES, 0, 36)
-	//fmt.print(projectionLoc)
+	// //new_m := test_model
+	// //new_m.transform += glm.mat4Translate(position)
+	// //position.x += 0.07 * deltaTime
+	// //draw_scene(new_m,&shadder,lightPos,cam,view,projection)
 
-	//fmt.print("in a loop")
-	gl.BindVertexArray(0)
-	GUI_Render()
+	// MainLevel(&shadder,lightPos,cam,view,projection,&ter)
+
+	// gl.UseProgram(program)
+
+	// model = 1.0
+	// model *= glm.mat4Translate(lightPos)
+	// scale : glm.vec3=0.3
+	// //model *= glm.mat4Scale(scale)
+	// view = CameraViewMatrix(cam)
+	// gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
+	// gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
+	// gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
+
+	// gl.BindVertexArray(vao)
+
+	// gl.DrawArrays(gl.TRIANGLES, 0, 36)
+	// //fmt.print(projectionLoc)
+
+	// //fmt.print("in a loop")
+	// gl.BindVertexArray(0)
+	// GUI_Render()
 }
 
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
-	
+
 	if key == glfw.KEY_ESCAPE {
 		running = false
 	}
 
 	if key == glfw.KEY_TAB && action == glfw.RELEASE
 	{
-			
+
 			GUI.state.isInDebugMode = !GUI.state.isInDebugMode
-			glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-		
+			//glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+
 	}
 }
 
@@ -410,50 +498,52 @@ mouse_callback :: proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
 	lastYpos = f32(ypos)
 	if(!GUI.state.isInDebugMode)
 	{
-		processCameraMouseMovements(&cam, xoffset, yoffset)
+		//processCameraMouseMovements(&cam, xoffset, yoffset)
 	}
 
 }
 
 size_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
-	
-	gl.Viewport(0, 0, width, height)
-	guiWidth = width
-	guiHeight = height
-	projection = glm.mat4Perspective(f32(math.to_radians(45.0)), f32(width) / f32(height), 0.1, 1000)
+    return
+	// gl.Viewport(0, 0, width, height)
+	// guiWidth = width
+	// guiHeight = height
+	// projection = glm.mat4Perspective(f32(math.to_radians(45.0)), f32(width) / f32(height), 0.1, 1000)
 }
 
 load_texture :: proc (path: cstring ) -> u32 {
-	textureID: u32
-	gl.GenTextures(1,&textureID)
 
-	width, height, nrComponents :i32
-	data := stb.load(path,&width,&height,&nrComponents,0)
-	
-	if(data != nil){
-		format : int
-		if(nrComponents == 0)
-		{
-			format = gl.RED;
-		}
-		else if(nrComponents == 3){
-			format = gl.RGB
-		}
-		else if(nrComponents == 4){
-			format = gl.RGBA
-		}
-		gl.BindTexture(gl.TEXTURE_2D, textureID);
-		gl.TexImage2D(gl.TEXTURE_2D, 0, i32(format), width, height, 0, u32(format), gl.UNSIGNED_BYTE, data);
-		gl.GenerateMipmap(gl.TEXTURE_2D)
+    return 80085;
+ //    textureID: u32
+	// gl.GenTextures(1,&textureID)
 
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-	}else{
-		fmt.println("err: loaded image wrong")
-		
-	}
+	// width, height, nrComponents :i32
+	// data := stb.load(path,&width,&height,&nrComponents,0)
 
-	return textureID		
+	// if(data != nil){
+	// 	format : int
+	// 	if(nrComponents == 0)
+	// 	{
+	// 		format = gl.RED;
+	// 	}
+	// 	else if(nrComponents == 3){
+	// 		format = gl.RGB
+	// 	}
+	// 	else if(nrComponents == 4){
+	// 		format = gl.RGBA
+	// 	}
+	// 	gl.BindTexture(gl.TEXTURE_2D, textureID);
+	// 	gl.TexImage2D(gl.TEXTURE_2D, 0, i32(format), width, height, 0, u32(format), gl.UNSIGNED_BYTE, data);
+	// 	gl.GenerateMipmap(gl.TEXTURE_2D)
+
+	// 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+ //        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+ //        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+ //        gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	// }else{
+	// 	fmt.println("err: loaded image wrong")
+
+	// }
+
+	// return textureID
 }
