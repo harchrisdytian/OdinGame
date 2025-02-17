@@ -2,7 +2,7 @@ package main
 
 import "core:fmt"
 import "vendor:glfw"
-
+import "core:slice"
 // import ""
 import gl "vendor:OpenGL"
 import stb "vendor:stb/image"
@@ -58,15 +58,33 @@ GAME_TITLE :: "The Projector"
 DEFAULT_WIDTH :: 800
 DEFAULT_HEIGHT :: 600
 // Vulkan Type Defines
+
+
 v_appInfo : vk.ApplicationInfo
 v_createInfo : vk.InstanceCreateInfo
 v_instance :vk.Instance
 v_physicalDevice : vk.PhysicalDevice
 v_device : vk.Device
+v_surface : vk.SurfaceKHR
+v_queue_familiy_indicies : map[queue_families]u32
+
+
+
+queue_families :: enum
+{
+    GRAPHICS,
+    PRESENT
+}
+
+
 VALIDATION_lAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation"};
 init :: proc() -> glfw.WindowHandle
 {
+
     if(glfw.Init() && glfw.VulkanSupported()){
+	
+	for que in &v_queue_familiy_indicies do que = -1
+
 	glfw.WindowHint(glfw.CLIENT_API,glfw.NO_API)
 	glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE)
 	
@@ -148,13 +166,17 @@ init :: proc() -> glfw.WindowHandle
 	when ODIN_DEBUG {
 	    deviceProperties : vk.PhysicalDeviceProperties
 	    vk.GetPhysicalDeviceProperties(v_physicalDevice, &deviceProperties)
+	    // TODO: check for device properties as needed :)
 	}
-	deviceCreateInfo : vk.DeviceCreateInfo
-	deviceCreateInfo.sType = vk.StructureType.DEVICE_CREATE_INFO
-	deviceCreateInfo.pNext = nil // next pointer to a different device 
-
 	
-    
+	find_queue_family()
+
+	create_device()
+
+	glfw.CreateWindowSurface(v_instance,window,nil,&v_surface)
+
+	create_renderpass()
+
     }
     else
 	{
@@ -511,6 +533,87 @@ size_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
 	// projection = glm.mat4Perspective(f32(math.to_radians(45.0)), f32(width) / f32(height), 0.1, 1000)
 }
 
+
+
+find_queue_family :: proc()
+{
+    queue_count : u32
+    vk.GetPhysicalDeviceQueueFamilyProperties(v_physicalDevice, &queue_count, nil)
+    available_queues := make([]vk.QueueFamilyProperties, queue_count)
+    vk.GetPhysicalDeviceQueueFamilyProperties(v_physicalDevice, &queue_count, raw_data(available_queues))
+
+    for queue, index in available_queues 
+    {
+	    
+	if vk.QueueFlag.GRAPHICS in queue.queueFlags && v_queue_familiy_indicies[queue_families.GRAPHICS] == -1 do v_queue_familiy_indicies[queue_families.GRAPHICS] = u32(index) 
+    
+	present_support : b32
+	vk.GetPhysicalDeviceSurfaceSupportKHR(v_device, u32(i),v_surface, &present_support)
+	
+	if present_support && v_queue_familiy_indicies[queue_families.PRESENT] == -1 do v_queue_familiy_indicies[queue_families.PRESENT] = u32(index)
+	
+	for que in v_queue_familiy_indicies do if que == -1 do continue
+	break;
+    }
+}
+create_device :: proc()
+{
+    
+    find_queue_family()
+
+    //initilize event queues
+
+    queuePriority :f32 = 1.0
+    queue_create_infos : [dynamic]vk.DeviceQueueCreateInfo
+    defer delete(queue_create_infos)
+    for i in v_queue_familiy_indicies
+    {
+	createInfo : vk.DeviceQueueCreateInfo
+	createInfo.sType = .DEVICE_CREATE_INFOu
+	createInfo.pNext = nil
+	createInfo.queueFamilyIndex = u32(v_queue_familiy_indicies[queue_families.GRAPHICS])
+	createInfo.queueCount = 1
+	createInfo.pQueuePriorities = &queuePriority
+    }
+    
+    deviceFeatures : vk.PhysicalDeviceFeatures
+    deviceCreateInfo : vk.DeviceCreateInfo
+    deviceCreateInfo.sType = .DEVICE_CREATE_INFO
+    deviceCreateInfo.pNext = nil
+    deviceCreateInfo.pEnabledFeatures = &deviceFeatures
+    deviceCreateInfo.queueCreateInfoCount =1 
+    deviceCreateInfo.pQueueCreateInfos = raw_data(queue_create_infos)
+    deviceCreateInfo.queueCreateInfoCount = 1
+    
+    if(vk.CreateDevice(v_physicalDevice, &deviceCreateInfo,nil, &v_device) != vk.Result.SUCCESS){
+	fmt.eprint("ERROR: cannot load logical device")
+    }
+}
+
+create_renderpass :: proc ()
+{
+    
+}
+
+create_shader_module :: proc(code: []byte) -> (module : vk.ShaderModule)
+{
+    shaderData := slice.reinterpret([]u32,code)
+    
+    // data needed to make a shader module
+    info : vk.ShaderModuleCreateInfo
+    info.sType = .SHADER_MODULE_CREATE_INFO
+    info.pCode = raw_data(shaderData)
+    info.codeSize = len(shaderData)
+
+    if(vk.CreateShaderModule(v_device,&info,nil,&module) == vk.Result.SUCCESS)
+    {
+	return module
+    }
+    else{
+	fmt.eprint("ERROR: failed to create shader module")
+    }
+    return
+}
 load_texture :: proc (path: cstring ) -> u32 {
 
     return 80085;
