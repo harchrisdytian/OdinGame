@@ -67,8 +67,28 @@ v_physicalDevice : vk.PhysicalDevice
 v_device : vk.Device
 v_surface : vk.SurfaceKHR
 v_queue_familiy_indicies : map[queue_families]u32
+v_queues : map[queue_fanilies]vk.Queue
+v_swapchain :Swapchain
 
+Swapchain::struct
+{
+    handle: vk.SwapchainKHR,
+    images: []vk.Image,
+    image_views:[]vk.ImageView,
+    format: []vk.SurfaceFormatKHR,
+    extent: vk.Extent2D,
+    present_mode : vk.PresentModeKHR,
+    image_count : u32,
+    support : SwapchainDetails,
+    frame_buffers :vk.Framebuffer
+}
 
+SwapchainDetails:: struct
+{
+    capabilities: vk.SurfaceCapabilitiesKHR,
+    format: []vk.SurfaceFormatKHR,
+    present_mode: []vk.PresentModeKHR
+}
 
 queue_families :: enum
 {
@@ -169,11 +189,20 @@ init :: proc() -> glfw.WindowHandle
 	    // TODO: check for device properties as needed :)
 	}
 	
+	glfw.CreateWindowSurface(v_instance,window,nil,&v_surface)
+	
 	find_queue_family()
 
 	create_device()
+	
+	//find queuse
+	for que, f in &queues
+	{
+	    vk.GetDeviceQueue(v_device, u32(v_queue_familiy_indicies[f]),0 &que);
+	}
+	
 
-	glfw.CreateWindowSurface(v_instance,window,nil,&v_surface)
+	create_swapchain()
 
 	create_renderpass()
 
@@ -569,7 +598,7 @@ create_device :: proc()
     for i in v_queue_familiy_indicies
     {
 	createInfo : vk.DeviceQueueCreateInfo
-	createInfo.sType = .DEVICE_CREATE_INFOu
+	createInfo.sType = .DEVICE_CREATE_INFO
 	createInfo.pNext = nil
 	createInfo.queueFamilyIndex = u32(v_queue_familiy_indicies[queue_families.GRAPHICS])
 	createInfo.queueCount = 1
@@ -588,6 +617,11 @@ create_device :: proc()
     if(vk.CreateDevice(v_physicalDevice, &deviceCreateInfo,nil, &v_device) != vk.Result.SUCCESS){
 	fmt.eprint("ERROR: cannot load logical device")
     }
+}
+
+create_swapchain ::proc ()
+{
+    using v_swapchain.support
 }
 
 create_renderpass :: proc ()
