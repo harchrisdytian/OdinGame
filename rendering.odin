@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "base:runtime"
 import "vendor:glfw"
 import "core:slice"
 // import ""
@@ -24,7 +25,7 @@ texture2: u32
 modelLoc: i32
 viewLoc: i32
 projectionLoc: i32
-
+ctx : runtime.Context
 
 model: math.Matrix4f32
 view: math.Matrix4f32
@@ -66,8 +67,8 @@ v_instance :vk.Instance
 v_physicalDevice : vk.PhysicalDevice
 v_device : vk.Device
 v_surface : vk.SurfaceKHR
-v_queue_familiy_indicies : map[queue_families]u32
-v_queues : map[queue_fanilies]vk.Queue
+v_queue_familiy_indicies : [queue_families]int
+v_queues : [queue_families]vk.Queue
 v_swapchain :Swapchain
 
 Swapchain::struct
@@ -75,7 +76,7 @@ Swapchain::struct
     handle: vk.SwapchainKHR,
     images: []vk.Image,
     image_views:[]vk.ImageView,
-    format: []vk.SurfaceFormatKHR,
+    format: vk.SurfaceFormatKHR,
     extent: vk.Extent2D,
     present_mode : vk.PresentModeKHR,
     image_count : u32,
@@ -96,34 +97,32 @@ queue_families :: enum
     PRESENT
 }
 
-
+DEVICE_FEATURES := [?]cstring{ vk.KHR_SWAPCHAIN_EXTENSION_NAME }
 VALIDATION_lAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation"};
 init :: proc() -> glfw.WindowHandle
 {
 
     if(glfw.Init() && glfw.VulkanSupported()){
 	
-	for que in &v_queue_familiy_indicies do que = -1
+	for &que in &v_queue_familiy_indicies do que = -1
 
 	glfw.WindowHint(glfw.CLIENT_API,glfw.NO_API)
-	glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE)
 	
 	v_appInfo.sType = vk.StructureType.APPLICATION_INFO
-	v_appInfo.apiVersion = vk.API_VERSION_1_0
+	v_appInfo.apiVersion = vk.API_VERSION_1_3
 	v_appInfo.pEngineName = "hardy engine"
 	v_appInfo.engineVersion = vk.MAKE_VERSION(0,0,1)
 	v_appInfo.applicationVersion = vk.MAKE_VERSION(0,0,1)
 	
 	v_createInfo.sType =vk.StructureType.INSTANCE_CREATE_INFO
 	v_createInfo.pApplicationInfo = &v_appInfo
-	glfwExt := glfw.GetRequiredInstanceExtensions()
 	
-	v_createInfo.ppEnabledExtensionNames = raw_data(glfwExt)
-	v_createInfo.enabledLayerCount = cast(u32)len(glfwExt)
+	glfwExt := slice.clone_to_dynamic(glfw.GetRequiredInstanceExtensions(),context.temp_allocator)
+	
 	monitor := glfw.GetVideoMode(glfw.GetPrimaryMonitor())
 	window = glfw.CreateWindow(DEFAULT_WIDTH,DEFAULT_HEIGHT,GAME_TITLE, glfw.GetPrimaryMonitor() ,nil)
 	
-
+	ctx = context
 	// initilze vulkan
 	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 	assert(vk.CreateInstance != nil, "vulkan function pointers not loaded")	// enableing vulkan debuggin 
@@ -134,8 +133,11 @@ init :: proc() -> glfw.WindowHandle
 	    vk.EnumerateInstanceLayerProperties(&layerCount,nil)
 	    layers := make([]vk.LayerProperties, layerCount)
 	    vk.EnumerateInstanceLayerProperties(&layerCount,raw_data(layers))
-	    
 	    check := false
+
+
+	    append(&glfwExt,vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
+	    
 	    for name in VALIDATION_lAYERS
 	    {
 		for layer in layers
@@ -154,22 +156,40 @@ init :: proc() -> glfw.WindowHandle
 			//os.exit(1)
 		
 	    }
+	    severity : vk.DebugUtilsMessageSeverityFlagsEXT
+	    severity |= {.INFO}
+	    severity |= {.WARNING}
+	    severity |= {.VERBOSE}
+	    severity |= {.ERROR}
+	    dgb_createInfo : vk.DebugUtilsMessengerCreateInfoEXT 
+	    dgb_createInfo.sType = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
+	    dgb_createInfo.messageSeverity = severity
+	    dgb_createInfo.messageType = {.GENERAL, .VALIDATION, .PERFORMANCE, .DEVICE_ADDRESS_BINDING}
+	    dgb_createInfo.pfnUserCallback = vk_messenger_callback
 	    v_createInfo.ppEnabledLayerNames = &VALIDATION_lAYERS[0]
 	    v_createInfo.enabledLayerCount = len(VALIDATION_lAYERS)
+
+	    v_createInfo.pNext = &dgb_createInfo
 	}
 	else
 	{
 	    v_createInfo.enabledLayerCount = 0
 	}
+	
+	v_createInfo.ppEnabledExtensionNames = raw_data(glfwExt)
+	v_createInfo.enabledExtensionCount = cast(u32)len(glfwExt)
+	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
+	
+	//vk.ProcEnumeratePhysicalDevices = glfw.GetInstanceProcAddress(v_instance, "vkGetDeviceProcAddr")
 
 	if(vk.CreateInstance(&v_createInfo, nil ,&v_instance) != vk.Result.SUCCESS){
 	    fmt.eprint("ERROR: failed to create instance")
 	}
 	
-	count : u32
 	vk.load_proc_addresses_instance(v_instance)
-	vk.load_proc_addresses_device(v_device)
+	res := glfw.CreateWindowSurface(v_instance,window,nil,&v_surface) 
 	
+	count : u32
 	if(vk.EnumeratePhysicalDevices(v_instance,&count,nil)!= vk.Result.SUCCESS){
 	    fmt.eprint("ERROR: can't enummerate the physical device")
 	}
@@ -188,17 +208,21 @@ init :: proc() -> glfw.WindowHandle
 	    vk.GetPhysicalDeviceProperties(v_physicalDevice, &deviceProperties)
 	    // TODO: check for device properties as needed :)
 	}
-	
-	glfw.CreateWindowSurface(v_instance,window,nil,&v_surface)
+		
+	if( res != vk.Result.SUCCESS)
+	{
+	    fmt.eprint("ERROR: failed to create Surface", res)
+	    
+	}
 	
 	find_queue_family()
 
 	create_device()
 	
 	//find queuse
-	for que, f in &queues
+	for &que, f in &v_queues
 	{
-	    vk.GetDeviceQueue(v_device, u32(v_queue_familiy_indicies[f]),0 &que);
+	    vk.GetDeviceQueue(v_device, u32(v_queue_familiy_indicies[f]), 0, &que);
 	}
 	
 
@@ -574,12 +598,11 @@ find_queue_family :: proc()
     for queue, index in available_queues 
     {
 	    
-	if vk.QueueFlag.GRAPHICS in queue.queueFlags && v_queue_familiy_indicies[queue_families.GRAPHICS] == -1 do v_queue_familiy_indicies[queue_families.GRAPHICS] = u32(index) 
+	if vk.QueueFlag.GRAPHICS in queue.queueFlags && v_queue_familiy_indicies[queue_families.GRAPHICS] == -1 do v_queue_familiy_indicies[queue_families.GRAPHICS] = int(index) 
     
 	present_support : b32
-	vk.GetPhysicalDeviceSurfaceSupportKHR(v_device, u32(i),v_surface, &present_support)
-	
-	if present_support && v_queue_familiy_indicies[queue_families.PRESENT] == -1 do v_queue_familiy_indicies[queue_families.PRESENT] = u32(index)
+	vk.GetPhysicalDeviceSurfaceSupportKHR(v_physicalDevice, u32(index),v_surface, &present_support)
+	if present_support && v_queue_familiy_indicies[queue_families.PRESENT] == -1 do v_queue_familiy_indicies[queue_families.PRESENT] = int(index)
 	
 	for que in v_queue_familiy_indicies do if que == -1 do continue
 	break;
@@ -598,20 +621,22 @@ create_device :: proc()
     for i in v_queue_familiy_indicies
     {
 	createInfo : vk.DeviceQueueCreateInfo
-	createInfo.sType = .DEVICE_CREATE_INFO
+	createInfo.sType = .DEVICE_QUEUE_CREATE_INFO
 	createInfo.pNext = nil
 	createInfo.queueFamilyIndex = u32(v_queue_familiy_indicies[queue_families.GRAPHICS])
 	createInfo.queueCount = 1
 	createInfo.pQueuePriorities = &queuePriority
+	append(&queue_create_infos ,createInfo)
     }
     
     deviceFeatures : vk.PhysicalDeviceFeatures
     deviceCreateInfo : vk.DeviceCreateInfo
     deviceCreateInfo.sType = .DEVICE_CREATE_INFO
-    deviceCreateInfo.pNext = nil
     deviceCreateInfo.pEnabledFeatures = &deviceFeatures
-    deviceCreateInfo.queueCreateInfoCount =1 
+    deviceCreateInfo.queueCreateInfoCount =u32(len(queue_create_infos))
     deviceCreateInfo.pQueueCreateInfos = raw_data(queue_create_infos)
+    deviceCreateInfo.ppEnabledExtensionNames = raw_data(DEVICE_FEATURES[:])
+    deviceCreateInfo.enabledExtensionCount = u32(len(DEVICE_FEATURES))
     deviceCreateInfo.queueCreateInfoCount = 1
     
     if(vk.CreateDevice(v_physicalDevice, &deviceCreateInfo,nil, &v_device) != vk.Result.SUCCESS){
@@ -621,9 +646,125 @@ create_device :: proc()
 
 create_swapchain ::proc ()
 {
-    using v_swapchain.support
-}
+    // geting support
+    vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(v_physicalDevice,v_surface,&v_swapchain.support.capabilities)
+    formatCount : u32 
+    vk.GetPhysicalDeviceSurfaceFormatsKHR(v_physicalDevice ,v_surface, &formatCount,nil)
+    if formatCount > 0
+    {
+	v_swapchain.support.format = make([]vk.SurfaceFormatKHR,formatCount)
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(v_physicalDevice,v_surface, &formatCount,raw_data(v_swapchain.support.format))
+	fmt.print("format stuff")
+    }
+    
+    presentModeCount : u32
+    vk.GetPhysicalDeviceSurfacePresentModesKHR(v_physicalDevice,v_surface,&presentModeCount,nil)
+    if presentModeCount > 0
+    { 
+	v_swapchain.support.present_mode = make([]vk.PresentModeKHR,presentModeCount)
+	vk.GetPhysicalDeviceSurfacePresentModesKHR(v_physicalDevice,v_surface,&presentModeCount,raw_data(v_swapchain.support.present_mode))
+    }
+   
+    v_swapchain.format = v_swapchain.support.format[0]
+    for format in v_swapchain.support.format
+    {
+	if format.format == vk.Format.B8G8R8A8_SRGB && format.colorSpace == vk.ColorSpaceKHR.SRGB_NONLINEAR 
+	{
+	    v_swapchain.format = format
+	    break;
+	}
+    }
+    
+    v_swapchain.present_mode = vk.PresentModeKHR.FIFO
 
+    for presentMode in v_swapchain.support.present_mode
+    {
+	if presentMode == vk.PresentModeKHR.MAILBOX
+	{
+	    v_swapchain.present_mode = presentMode
+	    break;
+	}
+    }
+    
+    if v_swapchain.support.capabilities.currentExtent.width != max(u32)
+    {
+	v_swapchain.extent = v_swapchain.support.capabilities.currentExtent
+	fmt.println("\n chain extent one", v_swapchain.support.capabilities.currentExtent,"\n ")
+
+    }
+    else
+    {
+	width,height := glfw.GetFramebufferSize(window)
+
+	extent := vk.Extent2D{u32(width),u32(height)}
+
+	extent.width = clamp(extent.width, v_swapchain.support.capabilities.minImageExtent.width,v_swapchain.support.capabilities.maxImageExtent.width)
+	extent.height = clamp(extent.height, v_swapchain.support.capabilities.minImageExtent.height,v_swapchain.support.capabilities.maxImageExtent.height)
+	
+	v_swapchain.extent= extent
+
+    }
+
+    v_swapchain.image_count = v_swapchain.support.capabilities.minImageCount + 1
+     
+    if v_swapchain.support.capabilities.maxImageCount < 0 && v_swapchain.image_count > v_swapchain.support.capabilities.maxImageCount
+    {
+	v_swapchain.image_count = v_swapchain.support.capabilities.maxImageCount 
+    }
+
+
+    create_info: vk.SwapchainCreateInfoKHR
+    create_info.sType = .SWAPCHAIN_CREATE_INFO_KHR
+    create_info.surface = v_surface
+    create_info.minImageCount = v_swapchain.image_count
+    create_info.presentMode = v_swapchain.present_mode
+    create_info.imageFormat = v_swapchain.format.format
+    create_info.imageColorSpace = v_swapchain.format.colorSpace
+    create_info.imageExtent = v_swapchain.extent
+    create_info.imageArrayLayers = 1
+    create_info.imageUsage = {.COLOR_ATTACHMENT}
+
+    queueIndicies := [len(v_queue_familiy_indicies)]u32{u32(v_queue_familiy_indicies[queue_families.PRESENT]), u32(v_queue_familiy_indicies[queue_families.GRAPHICS])}
+    
+    if(queueIndicies[queue_families.GRAPHICS] != queueIndicies[queue_families.PRESENT])
+    {
+	create_info.imageSharingMode = .CONCURRENT
+	create_info.queueFamilyIndexCount = 2
+	create_info.pQueueFamilyIndices = &queueIndicies[0]
+    }
+    else
+    {
+	create_info.imageSharingMode = .EXCLUSIVE
+	create_info.queueFamilyIndexCount = 0
+	create_info.pQueueFamilyIndices = nil
+    }
+
+    create_info.preTransform = v_swapchain.support.capabilities.currentTransform
+    create_info.compositeAlpha = {.OPAQUE}
+    create_info.presentMode = v_swapchain.present_mode
+    create_info.clipped = true
+    create_info.oldSwapchain = vk.SwapchainKHR{}
+
+    if vk.CreateSwapchainKHR(v_device, &create_info, nil, &v_swapchain.handle) != vk.Result.SUCCESS
+    {
+	fmt.eprint("ERROR: failed to create swapchain")
+    }
+    vk.GetSwapchainImagesKHR(v_device,v_swapchain.handle,&v_swapchain.image_count,nil)
+    v_swapchain.images = make([]vk.Image,v_swapchain.image_count)
+    vk.GetSwapchainImagesKHR(v_device,v_swapchain.handle,&v_swapchain.image_count,raw_data(v_swapchain.images))
+    
+    
+
+}
+create_image_views:: proc()
+{
+    // create image views
+    v_swapchain.image_views = make([]vk.ImageView,len(v_swapchain.images))
+    for image, index in v_swapchain.image_count
+    {
+	create_info : vk.ImageViewCreateInfo
+    }
+}
 create_renderpass :: proc ()
 {
     
@@ -684,3 +825,17 @@ load_texture :: proc (path: cstring ) -> u32 {
 
 	// return textureID
 }
+
+vk_messenger_callback :: proc "system" (
+	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
+	messageTypes: vk.DebugUtilsMessageTypeFlagsEXT,
+	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
+	pUserData: rawptr,
+) -> b32
+{
+   context = ctx 
+    fmt.println("vulkan[]:", messageTypes, pCallbackData.pMessage)
+    return false
+}
+
+
