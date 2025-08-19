@@ -1,10 +1,14 @@
 package main
 
+import intr "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import "core:slice"
 import "vendor:glfw"
 // import ""
+import vkb "Extern/odin-vk-bootstrap"
+import vma "Extern/odin-vma"
 import math "core:math/linalg"
 import glm "core:math/linalg/glsl"
 import gl "vendor:OpenGL"
@@ -36,7 +40,7 @@ position: glm.vec3
 lightPos: glm.vec3
 
 lastFrame, deltaTime, currentFrame: f32
-test_model: Scene
+// test_model: Scene
 
 lastXpos: f32
 lastYpos: f32
@@ -48,9 +52,9 @@ linear: UniformValue
 constant: UniformValue
 quadratic: UniformValue
 
-BaseCube: Scene
-BaseArch: Scene
-ter: terrain
+// BaseCube: Scene
+// BaseArch: Scene
+// ter: terrain
 
 SWAP_FRAMES :: 2
 
@@ -63,27 +67,59 @@ DEFAULT_HEIGHT :: 600
 FRAG :: #load("Shaders/vfrag.spv")
 VERT :: #load("Shaders/vVert.spv")
 
-v_frame_id: u32
-v_shader_stages: [2]vk.PipelineShaderStageCreateInfo
-v_appInfo: vk.ApplicationInfo
-v_createInfo: vk.InstanceCreateInfo
-v_instance: vk.Instance
-v_physicalDevice: vk.PhysicalDevice
-v_device: vk.Device
-v_surface: vk.SurfaceKHR
-v_queue_familiy_indicies: [queue_families]int
-v_queues: [queue_families]vk.Queue
-v_swapchain: Swapchain
-v_render_pass: vk.RenderPass
-v_pipline_layout: vk.PipelineLayout
-v_pipline: vk.Pipeline
-v_command_pool: vk.CommandPool
-v_command_buffer: [SWAP_FRAMES]vk.CommandBuffer
-v_image_available: [SWAP_FRAMES]vk.Semaphore
-v_signal_semaphore: [SWAP_FRAMES]vk.Semaphore
-v_fence: [SWAP_FRAMES]vk.Fence
+MODEL_VERT :: #load("Shaders/color_triangle.vert.spv")
+MODEL_FRAG :: #load("Shaders/color_triangle.frag.spv")
 
 
+engine: Engine
+
+Engine :: struct {
+	frame_id:               u32,
+	shader_stages:          [2]vk.PipelineShaderStageCreateInfo,
+	mesh_shader_stages:     [2]vk.PipelineShaderStageCreateInfo,
+	createInfo:             vk.InstanceCreateInfo,
+	instance:               vk.Instance,
+	physicalDevice:         vk.PhysicalDevice,
+	device:                 vk.Device,
+	surface:                vk.SurfaceKHR,
+	queue_familiy_indicies: [queue_families]int,
+	queues:                 [queue_families]vk.Queue,
+	swapchain:              Swapchain,
+	render_pass:            vk.RenderPass,
+	pipeline_layout:        vk.PipelineLayout,
+	mesh_pipeline_layout:   vk.PipelineLayout,
+	pipline:                vk.Pipeline,
+	mesh_pipline:           vk.Pipeline,
+	command_pool:           vk.CommandPool,
+	imm_command_pool:       vk.CommandPool,
+	command_buffer:         [SWAP_FRAMES]vk.CommandBuffer,
+	imm_command_buffer:     vk.CommandBuffer,
+	image_available:        [SWAP_FRAMES]vk.Semaphore,
+	signal_semaphore:       [SWAP_FRAMES]vk.Semaphore,
+	fence:                  [SWAP_FRAMES]vk.Fence,
+	immidate_fence:         vk.Fence,
+	vma_alloc :             vma.Allocator,
+	alloctor_buffer:        Buffer,
+	mesh:                   Mesh,
+	rect: MeshBuffer
+}
+
+Mesh :: struct {
+	pipeline_layout: vk.PipelineLayout,
+}
+
+PipelineData :: struct {
+	dyanamic_states:            []vk.DynamicState,
+	dyanamic_state_create_info: vk.PipelineDynamicStateCreateInfo,
+	vertex_input_info:          vk.PipelineVertexInputStateCreateInfo,
+	vertex_input:               vk.PipelineInputAssemblyStateCreateInfo,
+	viewport_state:             vk.PipelineViewportStateCreateInfo,
+	rasterizer:                 vk.PipelineRasterizationStateCreateInfo,
+	multisampler:               vk.PipelineMultisampleStateCreateInfo,
+	attachments:                vk.PipelineColorBlendAttachmentState,
+	color_blend:                vk.PipelineColorBlendStateCreateInfo,
+	pipeline_info:              vk.GraphicsPipelineCreateInfo,
+}
 Swapchain :: struct {
 	handle:        vk.SwapchainKHR,
 	images:        []vk.Image,
@@ -107,38 +143,49 @@ queue_families :: enum {
 	PRESENT,
 }
 
+MeshBuffer :: struct {
+	index_buffer:           Buffer,
+	vert_buffer:            Buffer,
+	vertext_buffer_address: vk.DeviceAddress,
+}
 
-CheckVK :: proc(Res :vk.Result, Description:string="something") {
-    if(Res != vk.Result.SUCCESS)
-    {
-	fmt.print("failed to do {}")
-    }
+Buffer :: struct {
+	buffer:     vk.Buffer,
+	info:       vma.Allocation_Info,
+	allocator:  vma.Allocator,
+	allocation: vma.Allocation,
+}
+
+Vertex :: struct {
+	position:   glm.vec3,
+	uv_x:   f32,
+	normal: glm.vec4,
+	uv_y:   f32,
+	color:  glm.vec4,
+}
+
+Push_Constant :: struct {
+	world_mat:     glm.mat4,
+	vertex_buffer: vk.DeviceAddress,
 }
 
 
-DEVICE_FEATURES := [?]cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
-VALIDATION_lAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation" }
+CheckVK :: proc(Res: vk.Result, Description: string = "something") {
+	if (Res != vk.Result.SUCCESS) {
+		fmt.print("failed to do {}")
+	}
+}
+
+
+DEVICE_FEATURES := [?]cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME,vk.EXT_MEMORY_BUDGET_EXTENSION_NAME}
+VALIDATION_lAYERS := [?]cstring{"VK_LAYER_KHRONOS_validation"}
 init :: proc() -> glfw.WindowHandle {
 
 	if (glfw.Init() && glfw.VulkanSupported()) {
 
-		for &que in &v_queue_familiy_indicies do que = -1
 
 		glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
-
-		v_appInfo.sType = vk.StructureType.APPLICATION_INFO
-		v_appInfo.apiVersion = vk.API_VERSION_1_3
-		v_appInfo.pEngineName = "hardy engine"
-		v_appInfo.engineVersion = vk.MAKE_VERSION(0, 0, 1)
-		v_appInfo.applicationVersion = vk.MAKE_VERSION(0, 0, 1)
-
-		v_createInfo.sType = vk.StructureType.INSTANCE_CREATE_INFO
-		v_createInfo.pApplicationInfo = &v_appInfo
-
-		glfwExt := slice.clone_to_dynamic(
-			glfw.GetRequiredInstanceExtensions(),
-			context.temp_allocator,
-		)
+		g_logger := context.logger
 
 		monitor := glfw.GetVideoMode(glfw.GetPrimaryMonitor())
 		window = glfw.CreateWindow(
@@ -153,70 +200,43 @@ init :: proc() -> glfw.WindowHandle {
 		// initilze vulkan
 		vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 		assert(vk.CreateInstance != nil, "vulkan function pointers not loaded") // enableing vulkan debuggin 
+		instance_builder_, ok := vkb.init_instance_builder()
+		vkb.instance_set_app_name(&instance_builder_, "OdinGame")
+		vkb.instance_require_api_version(&instance_builder_, vk.API_VERSION_1_3)
 
 		when ODIN_DEBUG 
 		{
-			layerCount: u32
-			vk.EnumerateInstanceLayerProperties(&layerCount, nil)
-			layers := make([]vk.LayerProperties, layerCount)
-			vk.EnumerateInstanceLayerProperties(&layerCount, raw_data(layers))
-			check := false
+			vkb.instance_request_validation_layers(&instance_builder_)
+			default_debug_callback :: proc "system" (
+				message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+				message_types: vk.DebugUtilsMessageTypeFlagsEXT,
+				p_callback_data: ^vk.DebugUtilsMessengerCallbackDataEXT,
+				p_user_data: rawptr,
+			) -> b32 {
+				context = runtime.default_context()
 
-
-			append(&glfwExt, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
-
-			for name in VALIDATION_lAYERS {
-				for layer in layers {
-					NamedLayer := layer.layerName
-					if name == cstring(raw_data(NamedLayer[:])) {
-						check = true
-						fmt.print("found")
-					}
+				if .WARNING in message_severity {
+					fmt.print("[%v]: %s", message_types, p_callback_data.pMessage)
+				} else if .ERROR in message_severity {
+					fmt.eprintf("[%v]: %s", message_types, p_callback_data.pMessage)
+					//runtime.debug_trap()
+				} else {
+					fmt.print("[%v]: %s", message_types, p_callback_data.pMessage)
 				}
-				if (!check) {
-					fmt.eprint("ERROR: validation line not available: ", name)
-				}
-				//os.exit(1)
 
+				return false // Applications must return false herev
 			}
-			severity: vk.DebugUtilsMessageSeverityFlagsEXT
-			severity |= {.INFO}
-			severity |= {.WARNING}
-			severity |= {.VERBOSE}
-			severity |= {.ERROR}
-			dgb_createInfo: vk.DebugUtilsMessengerCreateInfoEXT
-			dgb_createInfo.sType = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
-			dgb_createInfo.messageSeverity = severity
-			dgb_createInfo.messageType = {
-				.GENERAL,
-				.VALIDATION,
-				.PERFORMANCE,
-				.DEVICE_ADDRESS_BINDING,
-			}
-			dgb_createInfo.pfnUserCallback = vk_messenger_callback
-			v_createInfo.ppEnabledLayerNames = &VALIDATION_lAYERS[0]
-			v_createInfo.enabledLayerCount = len(VALIDATION_lAYERS)
 
-			v_createInfo.pNext = &dgb_createInfo
-		} else {
-			v_createInfo.enabledLayerCount = 0
+			vkb.instance_set_debug_callback(&instance_builder_, default_debug_callback)
 		}
+		VKB_instance, ok2 := vkb.build_instance(&instance_builder_)
+		engine.instance = VKB_instance.handle
 
-		v_createInfo.ppEnabledExtensionNames = raw_data(glfwExt)
-		v_createInfo.enabledExtensionCount = cast(u32)len(glfwExt)
-		vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 
-		//vk.ProcEnumeratePhysicalDevices = glfw.GetInstanceProcAddress(v_instance, "vkGetDeviceProcAddr")
-
-		if (vk.CreateInstance(&v_createInfo, nil, &v_instance) != vk.Result.SUCCESS) {
-			fmt.eprint("ERROR: failed to create instance")
-		}
-
-		vk.load_proc_addresses_instance(v_instance)
-		res := glfw.CreateWindowSurface(v_instance, window, nil, &v_surface)
+		res := glfw.CreateWindowSurface(engine.instance, window, nil, &engine.surface)
 
 		count: u32
-		if (vk.EnumeratePhysicalDevices(v_instance, &count, nil) != vk.Result.SUCCESS) {
+		if (vk.EnumeratePhysicalDevices(engine.instance, &count, nil) != vk.Result.SUCCESS) {
 			fmt.eprint("ERROR: can't enummerate the physical device")
 		}
 
@@ -224,14 +244,14 @@ init :: proc() -> glfw.WindowHandle {
 			fmt.eprint("ERROR: there is no physical device")
 		}
 
-		v_physicalDevices := make([]vk.PhysicalDevice, count)
-		vk.EnumeratePhysicalDevices(v_instance, &count, &v_physicalDevices[0])
+		_physicalDevices := make([]vk.PhysicalDevice, count)
+		vk.EnumeratePhysicalDevices(engine.instance, &count, &_physicalDevices[0])
 
-		v_physicalDevice = v_physicalDevices[0]
-		fmt.print(v_physicalDevice)
+		engine.physicalDevice = _physicalDevices[0]
+		fmt.print(engine.physicalDevice)
 		when ODIN_DEBUG {
 			deviceProperties: vk.PhysicalDeviceProperties
-			vk.GetPhysicalDeviceProperties(v_physicalDevice, &deviceProperties)
+			vk.GetPhysicalDeviceProperties(engine.physicalDevice, &deviceProperties)
 			// TODO: check for device properties as needed :)
 		}
 
@@ -245,198 +265,39 @@ init :: proc() -> glfw.WindowHandle {
 		create_device()
 
 		//find queuse
-		for &que, f in &v_queues {
-			vk.GetDeviceQueue(v_device, u32(v_queue_familiy_indicies[f]), 0, &que)
+		for &que, f in &engine.queues {
+			vk.GetDeviceQueue(engine.device, u32(engine.queue_familiy_indicies[f]), 0, &que)
 		}
+
+		fmt.print("should be something", vkb.convert_vulkan_to_vma_version(VKB_instance.api_version))
+		vma_vulkan_functions := vma.create_vulkan_functions()
+		
+
+		vma_vulkan_functions.get_physical_device_memory_properties2_khr = vk.GetPhysicalDeviceMemoryProperties2
+		vma_vulkan_functions.get_buffer_memory_requirements2_khr = vk.GetBufferMemoryRequirements2
+		
+	    allocator_create_info: vma.Allocator_Create_Info = {
+			flags              = {.Buffer_Device_Address},
+			instance           = engine.instance,
+			vulkan_api_version = (VKB_instance.api_version),
+			physical_device    = engine.physicalDevice,
+			device             = engine.device,
+			vulkan_functions   = &vma_vulkan_functions,
+		}
+
+		CheckVK(vma.create_allocator(allocator_create_info,&engine.vma_alloc), "failed to create buffer")
+		
+		
 
 
 		create_swapchain()
 
 		create_renderpass()
-		
+
 		create_command_pool()
 		create_sync_object()
-	
-    } else {
-		//   cam.position = {0.0, 0.0, 3.0}
-		//    cam.worldUp = {0.0, 1.0, 0.0}
 
-		//    cam.front = {0.0, 0.0, -1.0}
-		//    cam.yaw = -90.0
-		//  	lightPos = {-1.2,1.0,2.0}
-		//    //do proc stuff
-		//    glfw.WindowHint(glfw.RESIZABLE, 1)
-		//    glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
-		//    glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 6)
-		//    glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-
-		//    // intialize glfw
-		//    if (glfw.Init() != b32(true)) {
-
-		// 	   fmt.println("glfw fail to init")
-		// 	   return nil
-		// 	}
-
-		// 	_vidMode :^glfw.VidMode=glfw.GetVideoMode(glfw.GetPrimaryMonitor())
-		// 	glfw.WindowHint(glfw.RED_BITS,_vidMode.red_bits)
-		// 	glfw.WindowHint(glfw.GREEN_BITS,_vidMode.green_bits)
-		// 	glfw.WindowHint(glfw.BLUE_BITS,_vidMode.blue_bits)
-		// 	glfw.WindowHint(glfw.REFRESH_RATE,_vidMode.refresh_rate)
-		// 	window = glfw.CreateWindow(_vidMode.width, _vidMode.height, "something", glfw.GetPrimaryMonitor(), nil)
-
-		// 	glfw.MakeContextCurrent(window)
-		// 	glfw.SwapInterval(1)
-		// 	glfw.SetFramebufferSizeCallback(window, size_callback)
-		// 	glfw.SetKeyCallback(window, key_callback)
-		// 	gl.load_up_to(4, 6, glfw.gl_set_proc_address)
-		// 	gl.Enable(gl.DEPTH_TEST):0
-
-		// 	size_callback(window,_vidMode.width,_vidMode.height)
-
-		// 	glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_DISABLED);
-		// 	glfw.SetCharCallback(window,GUI_charCallBack)
-		// 	//fmt.println(give_output())
-
-		// 	//test_model.models= ModelCreatePath("Models/survival_guitar_backpack.glb")
-		// 	test_model.models= ModelCreatePath("Models/baseCube.glb")
-		// 	BaseCube.models =  ModelCreatePath("Models/unitbox.glb")
-		// 	BaseArch.models =  ModelCreatePath("Models/survival_guitar_backpack.glb")
-		// 	//fmt.print(BaseArch)
-		// 	//fmt.print(BaseArch)
-
-		// 	test_model.transform = glm.mat4Scale({1,1,1}) *0.01
-		// 	BaseArch.transform = glm.mat4Scale({1,1,1})
-		// 	BaseCube.transform = glm.mat4Scale({1,1,1})
-		// 	//test_model.transform = glm.mat4Translate({0.2,2,0.4})
-		// 	// for &i in test_model.models{
-		// 		// 	setupMesh(&i)
-		// 		// }
-
-		// 		ter = make_terrain("HeightMaps/hightmap.png")
-		// 		setup_scene(&test_model)
-		// 		setup_scene(&BaseCube)
-		// 		setup_scene(&BaseArch)
-
-
-		// 	program, shader_worked = gl.load_shaders("Shaders/shader1.vert", "Shaders/shader1.frag")
-		// 	gl.UseProgram(program)
-		// 	if (!shader_worked) {
-		// 		fmt.print("reg shader didn't work")
-		// 	}
-		// 	lightProgram, shader_worked = gl.load_shaders("Shaders/shader2.vert", "Shaders/shader2.frag")
-		// 	if(!shader_worked){
-		// 		fmt.print("light shder")
-		// 	}
-		// vert_data := [?] f32 {
-		// 	-0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
-		// 	0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
-		// 	0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
-		// 	0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,:0:
-		//    -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,
-		//    -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
-
-		//    -0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 0.0,
-		// 	0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 0.0,
-		// 	0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 1.0,
-		// 	0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   1.0, 1.0,
-		//    -0.5,  0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 1.0,
-		//    -0.5, -0.5,  0.5,  0.0,  0.0, 1.0,   0.0, 0.0,
-
-		//    -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
-		//    -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  1.0, 1.0,
-		//    -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
-		//    -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
-		//    -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  0.0, 0.0,
-		//    -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
-
-		// 	0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
-		// 	0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,
-		// 	0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
-		// 	0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
-		// 	0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,
-		// 	0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
-
-		//    -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
-		// 	0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 1.0,
-		// 	0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
-		// 	0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
-		//    -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 0.0,
-		//    -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
-
-		//    -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,
-		// 	0terraintessellation.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,
-		// 	0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
-		// 	0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
-		//    -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,
-		//    -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0} // top let
-
-
-		// gl.GenVertexArrays(1, &vao)
-
-		// gl.GenBuffers(1, &vbo)
-		// // gl.GenBuffers(1,&ebo)
-
-		// gl.BindVertexArray(vao)
-
-		// gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-		// gl.BufferData(gl.ARRAY_BUFFER, size_of(vert_data), &vert_data[0], gl.STATIC_DRAW)
-
-
-		// gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 0)
-		// gl.EnableVertexAttribArray(0)
-		// gl.VertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 3 * size_of(f32))
-		// gl.EnableVertexAttribArray(1)
-		// gl.VertexAttribPointer(2, 2, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 6 * size_of(f32))
-		// gl.EnableVertexAttribArray(2)
-
-		// gl.GenVertexArrays(1, &lightVao)
-		// gl.BindVertexArray(lightVao)
-
-		// gl.BindBuffer(gl.ARRAY_BUFFER,vbo)
-		// gl.VertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 0)
-		// gl.EnableVertexAttribArray(0)
-
-		// gl.VertexAttribPointer(1, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 3 * size_of(f32))
-		// gl.EnableVertexAttribArray(1)
-		// gl.VertexAttribPointer(2, 3, gl.FLOAT, gl.FALSE, 8 * size_of(f32), 6 * size_of(f32))
-		// gl.EnableVertexAttribArray(2)
-
-		// //color
-		// texture1 = load_texture("C:/Users/christian hardy/OdinGame/Textures/container2.png")
-		// fmt.print(texture1)
-		// texture2 = load_texture("C:/Users/christian hardy/OdinGame/Textures/container2_specular.png"))
-		// //gl.EnableVertexAttribArray(1)
-		// gl.BindBuffer(gl.ARRAY_BUFFER, 0)
-
-		// gl.BindVertexArray(0)
-		// gl.BindVertexArray(vao)
-		// gl.UseProgram(lightProgram)
-		// gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.diffuse"), 0)
-		// gl.Uniform1i(gl.GetUniformLocation(lightProgram,"material.specular"), 1)
-
-		// position = 1
-
-		// //stb.image_free(data)
-		// model = 1
-		// view = 1
-		// projection = 1
-		// projection = glm.mat4Perspective(f32(math.to_radians(45.0)), 512 / 512, 0.1, 1000)
-		// model *= glm.mat4Rotate({1, 0.5, 0}, f32(math.to_radians(glfw.GetTime() * 45.0)))
-		// view = CameraViewMatrix(cam)
-
-		// modelLoc = gl.GetUniformLocation(program, "model")
-		// viewLoc = gl.GetUniformLocation(program, "view")
-		// projectionLoc = gl.GetUniformLocation(program, "projection")
-
-		// gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
-		// gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
-		// gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
-
-		// glfw.SetCursorPosCallback(window, mouse_callback)
-
-		// gui_init()
-
-		// return window
+		default_data()
 	}
 	return nil
 }
@@ -523,95 +384,210 @@ update :: proc() {
 
 
 draw :: proc() {
-    vk.WaitForFences(v_device, 1, &v_fence[v_frame_id], true, max(u64))
-    image_index: u32
-    vk.ResetFences(v_device, 1, &v_fence[v_frame_id])
+	vk.WaitForFences(engine.device, 1, &engine.fence[engine.frame_id], true, max(u64))
+	image_index: u32
+	vk.ResetFences(engine.device, 1, &engine.fence[engine.frame_id])
 
-    res := vk.AcquireNextImageKHR(
-	    v_device,
-	    v_swapchain.handle,
-	    max(u64),
-	    v_image_available[v_frame_id],
-	    {},
-	    &image_index,
-    )
+	res := vk.AcquireNextImageKHR(
+		engine.device,
+		engine.swapchain.handle,
+		max(u64),
+		engine.image_available[engine.frame_id],
+		{},
+		&image_index,
+	)
 
-    #partial switch res 
-    {
-    case vk.Result.ERROR_OUT_OF_DATE_KHR, vk.Result.SUBOPTIMAL_KHR:
-	    recreate_swapchain()
-	    return
-    }
+	#partial switch res {
+	case vk.Result.ERROR_OUT_OF_DATE_KHR, vk.Result.SUBOPTIMAL_KHR:
+		recreate_swapchain()
+		return
+	}
 
-    vk.ResetCommandBuffer(v_command_buffer[v_frame_id], {})
-    record_command_buffer()
+	vk.ResetCommandBuffer(engine.command_buffer[engine.frame_id], {})
+	record_command_buffer(image_index)
 
-    queue_submit_info : vk.SubmitInfo 
-    queue_submit_info.sType = .SUBMIT_INFO
-    queue_submit_info.pWaitSemaphores = &v_image_available[v_frame_id]
-    queue_submit_info.waitSemaphoreCount = 1 
-    queue_submit_info.pWaitDstStageMask = &vk.PipelineStageFlags{vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT}
-    queue_submit_info.commandBufferCount = 1
-    queue_submit_info.pCommandBuffers = &v_command_buffer[v_frame_id]
-    queue_submit_info.signalSemaphoreCount =1
-    queue_submit_info.pSignalSemaphores = &v_signal_semaphore[v_frame_id]
-    
-    CheckVK(vk.QueueSubmit(v_queues[.PRESENT], 1,&queue_submit_info,v_fence[v_frame_id]))
-   
-    chains  := [?]vk.SwapchainKHR{v_swapchain.handle}
-    presentInfo : vk.PresentInfoKHR
-    presentInfo.sType = .PRESENT_INFO_KHR
-    presentInfo.waitSemaphoreCount =1 
-    presentInfo.pWaitSemaphores =&v_signal_semaphore[v_frame_id]
-    presentInfo.swapchainCount =1
-    presentInfo.pSwapchains = &chains[0]
-    presentInfo.pImageIndices = &image_index
-    presentInfo.pResults = nil
+	queue_submit_info: vk.SubmitInfo
+	queue_submit_info.sType = .SUBMIT_INFO
+	queue_submit_info.pWaitSemaphores = &engine.image_available[engine.frame_id]
+	queue_submit_info.waitSemaphoreCount = 1
+	queue_submit_info.pWaitDstStageMask =
+	&vk.PipelineStageFlags{vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT}
+	queue_submit_info.commandBufferCount = 1
+	queue_submit_info.pCommandBuffers = &engine.command_buffer[engine.frame_id]
+	queue_submit_info.signalSemaphoreCount = 1
+	queue_submit_info.pSignalSemaphores = &engine.signal_semaphore[engine.frame_id]
 
-    err := vk.QueuePresentKHR(v_queues[.PRESENT], &presentInfo)
-    
-    v_frame_id= (v_frame_id +1) % SWAP_FRAMES 
-    return
+	CheckVK(
+		vk.QueueSubmit(
+			engine.queues[.PRESENT],
+			1,
+			&queue_submit_info,
+			engine.fence[engine.frame_id],
+		),
+	)
 
-	//    gl.ClearColor(0.2, 0.3, 0.3, 1.)
-	// gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	chains := [?]vk.SwapchainKHR{engine.swapchain.handle}
+	presentInfo: vk.PresentInfoKHR
+	presentInfo.sType = .PRESENT_INFO_KHR
+	presentInfo.waitSemaphoreCount = 1
+	presentInfo.pWaitSemaphores = &engine.signal_semaphore[engine.frame_id]
+	presentInfo.swapchainCount = 1
+	presentInfo.pSwapchains = &chains[0]
+	presentInfo.pImageIndices = &image_index
+	presentInfo.pResults = nil
 
-	// lightPos.x = 1.0 + f32(math.sin(glfw.GetTime()*2.0))
-	// lightPos.y = f32(math.sin((glfw.GetTime()/2.0))) * 1.0
 
-	// gl.UseProgram(lightProgram)
-	// shadder :Shadder
-	// shadder.amProgram = lightProgram
+	err := vk.QueuePresentKHR(engine.queues[.PRESENT], &presentInfo)
 
-	// //draw_scene(test_model,&shadder,lightPos,cam,view,projection)
-	// //test_model.transform *= glm.mat4Scale({1,1,1})
+	engine.frame_id = (engine.frame_id + 1) % SWAP_FRAMES
 
-	// //new_m := test_model
-	// //new_m.transform += glm.mat4Translate(position)
-	// //position.x += 0.07 * deltaTime
-	// //draw_scene(new_m,&shadder,lightPos,cam,view,projection)
+}
 
-	// MainLevel(&shadder,lightPos,cam,view,projection,&ter)
+immediate_submit :: proc(data: $T, fn: proc(cmd: vk.CommandBuffer, data: T)) {
+	CheckVK(
+		vk.ResetFences(engine.device, 1, &engine.immidate_fence),
+		"failed to reset Immediate fense",
+	)
+	CheckVK(vk.ResetCommandBuffer(engine.imm_command_buffer, {}))
 
-	// gl.UseProgram(program)
+	cmd := engine.imm_command_buffer
 
-	// model = 1.0
-	// model *= glm.mat4Translate(lightPos)
-	// scale : glm.vec3=0.3
-	// //model *= glm.mat4Scale(scale)
-	// view = CameraViewMatrix(cam)
-	// gl.UniformMatrix4fv(modelLoc, 1, gl.FALSE, &model[0][0])
-	// gl.UniformMatrix4fv(viewLoc, 1, gl.FALSE, &view[0][0])
-	// gl.UniformMatrix4fv(projectionLoc, 1, gl.FALSE, &projection[0][0])
+	begin_info: vk.CommandBufferBeginInfo
+	begin_info.sType = .COMMAND_BUFFER_BEGIN_INFO
+	begin_info.flags = {.ONE_TIME_SUBMIT}
 
-	// gl.BindVertexArray(vao)
+	CheckVK(vk.BeginCommandBuffer(cmd, &begin_info))
 
-	// gl.DrawArrays(gl.TRIANGLES, 0, 36)
-	// //fmt.print(projectionLoc)
+	fn(cmd, data)
 
-	// //fmt.print("in a loop")
-	// gl.BindVertexArray(0)
-	// GUI_Render()
+	CheckVK(vk.EndCommandBuffer(cmd), "failed to end imediate command buffer")
+
+
+	cmd_submit_info: vk.CommandBufferSubmitInfo
+	cmd_submit_info.sType = .COMMAND_BUFFER_SUBMIT_INFO
+	cmd_submit_info.commandBuffer = cmd
+	sub_info: vk.SubmitInfo2
+	sub_info.sType = .SUBMIT_INFO_2
+	sub_info.waitSemaphoreInfoCount = 0
+	sub_info.signalSemaphoreInfoCount = 0
+	sub_info.commandBufferInfoCount = 1
+	sub_info.pCommandBufferInfos = &cmd_submit_info
+
+	CheckVK(vk.QueueSubmit2(engine.queues[.GRAPHICS], 1, &sub_info, engine.immidate_fence))
+	CheckVK(vk.WaitForFences(engine.device, 1, &engine.immidate_fence, true, 9999999))
+}
+
+
+upload_mesh :: proc(inds: []u32, verts: []Vertex) -> (new_surface: MeshBuffer) {
+
+
+	vert_size := vk.DeviceSize(len(verts) * size_of(Vertex))
+	ind_size := vk.DeviceSize(len(inds) * size_of(u32))
+
+	new_surface.vert_buffer = create_buffer(
+		vert_size,
+		{.STORAGE_BUFFER, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS},
+		.Gpu_Only,
+	)
+
+	device_address_info: vk.BufferDeviceAddressInfo
+	device_address_info.sType = .BUFFER_DEVICE_ADDRESS_INFO
+	device_address_info.buffer = new_surface.vert_buffer.buffer
+	fmt.print(new_surface.vert_buffer)
+	new_surface.vertext_buffer_address = vk.GetBufferDeviceAddress(
+		engine.device,
+		&device_address_info,
+	)
+
+	new_surface.index_buffer = create_buffer(ind_size, {.INDEX_BUFFER, .TRANSFER_DST}, .Gpu_Only)
+
+	stageing := create_buffer(vert_size + ind_size, {.TRANSFER_SRC}, .Cpu_Only)
+	intr.mem_copy(stageing.info.mapped_data, raw_data(verts), vert_size)
+
+	intr.mem_copy(
+		rawptr(uintptr(stageing.info.mapped_data) + uintptr(vert_size)),
+		raw_data(inds),
+		ind_size,
+	)
+	_CopyData :: struct {
+		staging_buffer:     vk.Buffer,
+		vertex_buffer:      vk.Buffer,
+		index_buffer:       vk.Buffer,
+		vertex_buffer_size: vk.DeviceSize,
+		index_buffer_size:  vk.DeviceSize,
+	}
+	copy_data: _CopyData
+
+	copy_data.staging_buffer = stageing.buffer
+	copy_data.vertex_buffer = new_surface.vert_buffer.buffer
+	copy_data.index_buffer = new_surface.index_buffer.buffer
+	copy_data.vertex_buffer_size = vert_size
+	copy_data.index_buffer_size = ind_size
+
+	immediate_submit(copy_data, proc(cmd: vk.CommandBuffer, data: _CopyData) {
+		vert_copy := vk.BufferCopy {
+			srcOffset = 0,
+			dstOffset = 0,
+			size      = data.vertex_buffer_size,
+		}
+		vk.CmdCopyBuffer(cmd, data.staging_buffer, data.vertex_buffer, 1, &vert_copy)
+
+
+		index_copy := vk.BufferCopy {
+			srcOffset = data.vertex_buffer_size,
+			dstOffset = 0,
+			size      = data.index_buffer_size,
+		}
+
+		vk.CmdCopyBuffer(cmd, data.staging_buffer, data.index_buffer, 1, &index_copy)
+	})
+	return
+}
+
+
+create_buffer :: proc(
+	alloc_size: vk.DeviceSize,
+	usage: vk.BufferUsageFlags,
+	memory_usage: vma.Memory_Usage,
+) -> (
+	new_buffer: Buffer,
+) {
+	buffer_info: vk.BufferCreateInfo
+	buffer_info.sType = .BUFFER_CREATE_INFO
+	buffer_info.size = alloc_size
+	buffer_info.usage = usage
+	
+
+	vma_alloc_info: vma.Allocation_Create_Info
+	vma_alloc_info.usage = memory_usage
+	vma_alloc_info.flags = {.Mapped}
+
+	new_buffer.allocator = engine.vma_alloc
+	fmt.print("ajsdlf;jladjf;j f \n \n \n  create buffer \n \n \n")
+	fmt.print(engine.alloctor_buffer.allocator)
+	
+	if (
+		vma.create_buffer(
+			new_buffer.allocator,
+			buffer_info,
+			vma_alloc_info,
+			&new_buffer.buffer,
+			&new_buffer.allocation,
+			&new_buffer.info,
+		) != vk.Result.SUCCESS)
+		{
+			
+	fmt.print(	" createing buffer")
+	}
+	
+
+	fmt.print("\n {} \n", new_buffer.buffer)
+	
+	return new_buffer
+}
+
+destroy_buffer :: proc(buff: Buffer) {
+	vma.destroy_buffer(buff.allocator, buff.buffer, buff.allocation)
 }
 
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
@@ -621,10 +597,7 @@ key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods
 	}
 
 	if key == glfw.KEY_TAB && action == glfw.RELEASE {
-
 		GUI.state.isInDebugMode = !GUI.state.isInDebugMode
-		//glfw.SetInputMode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)
-
 	}
 }
 
@@ -657,28 +630,28 @@ size_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
 
 find_queue_family :: proc() {
 	queue_count: u32
-	vk.GetPhysicalDeviceQueueFamilyProperties(v_physicalDevice, &queue_count, nil)
+	vk.GetPhysicalDeviceQueueFamilyProperties(engine.physicalDevice, &queue_count, nil)
 	available_queues := make([]vk.QueueFamilyProperties, queue_count)
 	vk.GetPhysicalDeviceQueueFamilyProperties(
-		v_physicalDevice,
+		engine.physicalDevice,
 		&queue_count,
 		raw_data(available_queues),
 	)
 
 	for queue, index in available_queues {
 
-		if vk.QueueFlag.GRAPHICS in queue.queueFlags && v_queue_familiy_indicies[queue_families.GRAPHICS] == -1 do v_queue_familiy_indicies[queue_families.GRAPHICS] = int(index)
+		if vk.QueueFlag.GRAPHICS in queue.queueFlags && engine.queue_familiy_indicies[queue_families.GRAPHICS] == -1 do engine.queue_familiy_indicies[queue_families.GRAPHICS] = int(index)
 
 		present_support: b32
 		vk.GetPhysicalDeviceSurfaceSupportKHR(
-			v_physicalDevice,
+			engine.physicalDevice,
 			u32(index),
-			v_surface,
+			engine.surface,
 			&present_support,
 		)
-		if present_support && v_queue_familiy_indicies[queue_families.PRESENT] == -1 do v_queue_familiy_indicies[queue_families.PRESENT] = int(index)
+		if present_support && engine.queue_familiy_indicies[queue_families.PRESENT] == -1 do engine.queue_familiy_indicies[queue_families.PRESENT] = int(index)
 
-		for que in v_queue_familiy_indicies do if que == -1 do continue
+		for que in engine.queue_familiy_indicies do if que == -1 do continue
 		break
 	}
 }
@@ -691,85 +664,128 @@ create_device :: proc() {
 	queuePriority: f32 = 1.0
 	queue_create_infos: [dynamic]vk.DeviceQueueCreateInfo
 	defer delete(queue_create_infos)
-	for i in v_queue_familiy_indicies {
+	for i in engine.queue_familiy_indicies {
 		createInfo: vk.DeviceQueueCreateInfo
 		createInfo.sType = .DEVICE_QUEUE_CREATE_INFO
 		createInfo.pNext = nil
-		createInfo.queueFamilyIndex = u32(v_queue_familiy_indicies[queue_families.GRAPHICS])
+		createInfo.queueFamilyIndex = u32(engine.queue_familiy_indicies[queue_families.GRAPHICS])
 		createInfo.queueCount = 1
 		createInfo.pQueuePriorities = &queuePriority
 		append(&queue_create_infos, createInfo)
 	}
 
+	device_features13 : vk.PhysicalDeviceVulkan13Features
+	device_features13.sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
+	device_features13.dynamicRendering = true
+	device_features13.synchronization2 = true
+
+	device_features12 : vk.PhysicalDeviceVulkan12Features
+	device_features12.sType = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+	device_features12.bufferDeviceAddress = true
+	device_features12.descriptorIndexing = true
+	device_features12.pNext = &device_features13
+	
+	
+	
+	deviceFeaturs2 :vk.PhysicalDeviceFeatures2
+	deviceFeaturs2.sType = .PHYSICAL_DEVICE_FEATURES_2
+	deviceFeaturs2.pNext = &device_features12
+	
 	deviceFeatures: vk.PhysicalDeviceFeatures
 	deviceCreateInfo: vk.DeviceCreateInfo
 	deviceCreateInfo.sType = .DEVICE_CREATE_INFO
-	deviceCreateInfo.pEnabledFeatures = &deviceFeatures
+	deviceCreateInfo.pEnabledFeatures = nil
 	deviceCreateInfo.queueCreateInfoCount = u32(len(queue_create_infos))
 	deviceCreateInfo.pQueueCreateInfos = raw_data(queue_create_infos)
 	deviceCreateInfo.ppEnabledExtensionNames = raw_data(DEVICE_FEATURES[:])
 	deviceCreateInfo.enabledExtensionCount = u32(len(DEVICE_FEATURES))
 	deviceCreateInfo.queueCreateInfoCount = 1
-
-	if (vk.CreateDevice(v_physicalDevice, &deviceCreateInfo, nil, &v_device) !=
+	deviceCreateInfo.pNext = &deviceFeaturs2
+	fmt.print("something ")
+	if (vk.CreateDevice(engine.physicalDevice, &deviceCreateInfo, nil, &engine.device) !=
 		   vk.Result.SUCCESS) {
-		fmt.eprint("ERROR: cannot load logical device")
+		fmt.eprint("ERROR: cannot loadengine.frame_idlogical device")
 	}
+
+
+	mem_props2: vk.PhysicalDeviceMemoryProperties2
+	mem_props2.sType = .PHYSICAL_DEVICE_MEMORY_PROPERTIES_2
+	mem_props2.pNext = nil
+
+	// m_VulkanFunctions.vkGetPhysicalDeviceMemoryProperties2KHR(engine.physicalDevice, &mem_props2)
+
+	vk.GetPhysicalDeviceMemoryProperties2(engine.physicalDevice, &mem_props2)
+	// access heaps
+	for i in 0..<mem_props2.memoryProperties.memoryTypeCount {
+	    mem_type := mem_props2.memoryProperties.memoryTypes[i]
+	    fmt.println("Heap: ", mem_type.heapIndex, " Flags: ", mem_type.propertyFlags)
+	}
+
+	fmt.print("something ")
 }
 
 create_swapchain :: proc() {
 	// geting support
 	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-		v_physicalDevice,
-		v_surface,
-		&v_swapchain.support.capabilities,
+		engine.physicalDevice,
+		engine.surface,
+		&engine.swapchain.support.capabilities,
 	)
 	formatCount: u32
-	vk.GetPhysicalDeviceSurfaceFormatsKHR(v_physicalDevice, v_surface, &formatCount, nil)
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(engine.physicalDevice, engine.surface, &formatCount, nil)
 	if formatCount > 0 {
-		v_swapchain.support.format = make([]vk.SurfaceFormatKHR, formatCount)
+		engine.swapchain.support.format = make([]vk.SurfaceFormatKHR, formatCount)
 		vk.GetPhysicalDeviceSurfaceFormatsKHR(
-			v_physicalDevice,
-			v_surface,
+			engine.physicalDevice,
+			engine.surface,
 			&formatCount,
-			raw_data(v_swapchain.support.format),
+			raw_data(engine.swapchain.support.format),
 		)
 		fmt.print("format stuff")
 	}
 
 	presentModeCount: u32
-	vk.GetPhysicalDeviceSurfacePresentModesKHR(v_physicalDevice, v_surface, &presentModeCount, nil)
+	vk.GetPhysicalDeviceSurfacePresentModesKHR(
+		engine.physicalDevice,
+		engine.surface,
+		&presentModeCount,
+		nil,
+	)
 	if presentModeCount > 0 {
-		v_swapchain.support.present_mode = make([]vk.PresentModeKHR, presentModeCount)
+		engine.swapchain.support.present_mode = make([]vk.PresentModeKHR, presentModeCount)
 		vk.GetPhysicalDeviceSurfacePresentModesKHR(
-			v_physicalDevice,
-			v_surface,
+			engine.physicalDevice,
+			engine.surface,
 			&presentModeCount,
-			raw_data(v_swapchain.support.present_mode),
+			raw_data(engine.swapchain.support.present_mode),
 		)
 	}
 
-	v_swapchain.format = v_swapchain.support.format[0]
-	for format in v_swapchain.support.format {
+	engine.swapchain.format = engine.swapchain.support.format[0]
+	for format in engine.swapchain.support.format {
 		if format.format == vk.Format.B8G8R8A8_SRGB &&
 		   format.colorSpace == vk.ColorSpaceKHR.SRGB_NONLINEAR {
-			v_swapchain.format = format
+			engine.swapchain.format = format
 			break
 		}
 	}
 
-	v_swapchain.present_mode = vk.PresentModeKHR.FIFO
+	engine.swapchain.present_mode = vk.PresentModeKHR.FIFO
 
-	for presentMode in v_swapchain.support.present_mode {
+	for presentMode in engine.swapchain.support.present_mode {
 		if presentMode == vk.PresentModeKHR.MAILBOX {
-			v_swapchain.present_mode = presentMode
+			engine.swapchain.present_mode = presentMode
 			break
 		}
 	}
 
-	if v_swapchain.support.capabilities.currentExtent.width != max(u32) {
-		v_swapchain.extent = v_swapchain.support.capabilities.currentExtent
-		fmt.println("\n chain extent one", v_swapchain.support.capabilities.currentExtent, "\n ")
+	if engine.swapchain.support.capabilities.currentExtent.width != max(u32) {
+		engine.swapchain.extent = engine.swapchain.support.capabilities.currentExtent
+		fmt.println(
+			"\n chain extent one",
+			engine.swapchain.support.capabilities.currentExtent,
+			"\n ",
+		)
 
 	} else {
 		width, height := glfw.GetFramebufferSize(window)
@@ -778,41 +794,41 @@ create_swapchain :: proc() {
 
 		extent.width = clamp(
 			extent.width,
-			v_swapchain.support.capabilities.minImageExtent.width,
-			v_swapchain.support.capabilities.maxImageExtent.width,
+			engine.swapchain.support.capabilities.minImageExtent.width,
+			engine.swapchain.support.capabilities.maxImageExtent.width,
 		)
 		extent.height = clamp(
 			extent.height,
-			v_swapchain.support.capabilities.minImageExtent.height,
-			v_swapchain.support.capabilities.maxImageExtent.height,
+			engine.swapchain.support.capabilities.minImageExtent.height,
+			engine.swapchain.support.capabilities.maxImageExtent.height,
 		)
 
-		v_swapchain.extent = extent
+		engine.swapchain.extent = extent
 
 	}
 
-	v_swapchain.image_count = v_swapchain.support.capabilities.minImageCount + 1
+	engine.swapchain.image_count = engine.swapchain.support.capabilities.minImageCount + 1
 
-	if v_swapchain.support.capabilities.maxImageCount < 0 &&
-	   v_swapchain.image_count > v_swapchain.support.capabilities.maxImageCount {
-		v_swapchain.image_count = v_swapchain.support.capabilities.maxImageCount
+	if engine.swapchain.support.capabilities.maxImageCount < 0 &&
+	   engine.swapchain.image_count > engine.swapchain.support.capabilities.maxImageCount {
+		engine.swapchain.image_count = engine.swapchain.support.capabilities.maxImageCount
 	}
 
 
 	create_info: vk.SwapchainCreateInfoKHR
 	create_info.sType = .SWAPCHAIN_CREATE_INFO_KHR
-	create_info.surface = v_surface
-	create_info.minImageCount = v_swapchain.image_count
-	create_info.presentMode = v_swapchain.present_mode
-	create_info.imageFormat = v_swapchain.format.format
-	create_info.imageColorSpace = v_swapchain.format.colorSpace
-	create_info.imageExtent = v_swapchain.extent
+	create_info.surface = engine.surface
+	create_info.minImageCount = engine.swapchain.image_count
+	create_info.presentMode = engine.swapchain.present_mode
+	create_info.imageFormat = engine.swapchain.format.format
+	create_info.imageColorSpace = engine.swapchain.format.colorSpace
+	create_info.imageExtent = engine.swapchain.extent
 	create_info.imageArrayLayers = 1
 	create_info.imageUsage = {.COLOR_ATTACHMENT}
 
-	queueIndicies := [len(v_queue_familiy_indicies)]u32 {
-		u32(v_queue_familiy_indicies[queue_families.PRESENT]),
-		u32(v_queue_familiy_indicies[queue_families.GRAPHICS]),
+	queueIndicies := [len(engine.queue_familiy_indicies)]u32 {
+		u32(engine.queue_familiy_indicies[queue_families.PRESENT]),
+		u32(engine.queue_familiy_indicies[queue_families.GRAPHICS]),
 	}
 
 	if (queueIndicies[queue_families.GRAPHICS] != queueIndicies[queue_families.PRESENT]) {
@@ -825,23 +841,28 @@ create_swapchain :: proc() {
 		create_info.pQueueFamilyIndices = nil
 	}
 
-	create_info.preTransform = v_swapchain.support.capabilities.currentTransform
+	create_info.preTransform = engine.swapchain.support.capabilities.currentTransform
 	create_info.compositeAlpha = {.OPAQUE}
-	create_info.presentMode = v_swapchain.present_mode
+	create_info.presentMode = engine.swapchain.present_mode
 	create_info.clipped = true
 	create_info.oldSwapchain = vk.SwapchainKHR{}
 
-	if vk.CreateSwapchainKHR(v_device, &create_info, nil, &v_swapchain.handle) !=
+	if vk.CreateSwapchainKHR(engine.device, &create_info, nil, &engine.swapchain.handle) !=
 	   vk.Result.SUCCESS {
 		fmt.eprint("ERROR: failed to create swapchain")
 	}
-	vk.GetSwapchainImagesKHR(v_device, v_swapchain.handle, &v_swapchain.image_count, nil)
-	v_swapchain.images = make([]vk.Image, v_swapchain.image_count)
 	vk.GetSwapchainImagesKHR(
-		v_device,
-		v_swapchain.handle,
-		&v_swapchain.image_count,
-		raw_data(v_swapchain.images),
+		engine.device,
+		engine.swapchain.handle,
+		&engine.swapchain.image_count,
+		nil,
+	)
+	engine.swapchain.images = make([]vk.Image, engine.swapchain.image_count)
+	vk.GetSwapchainImagesKHR(
+		engine.device,
+		engine.swapchain.handle,
+		&engine.swapchain.image_count,
+		raw_data(engine.swapchain.images),
 	)
 
 	create_image_views()
@@ -853,24 +874,24 @@ recreate_swapchain :: proc() {
 }
 
 destroy_swapchain :: proc() {
-	for v in v_swapchain.image_views {
-		vk.DestroyImageView(v_device, v, nil)
+	for v in engine.swapchain.image_views {
+		vk.DestroyImageView(engine.device, v, nil)
 	}
-	for frame in v_swapchain.frame_buffers {
-		vk.DestroyFramebuffer(v_device, frame, nil)
+	for frame in engine.swapchain.frame_buffers {
+		vk.DestroyFramebuffer(engine.device, frame, nil)
 	}
-	vk.DestroySwapchainKHR(v_device, v_swapchain.handle, nil)
+	vk.DestroySwapchainKHR(engine.device, engine.swapchain.handle, nil)
 
 }
 create_image_views :: proc() {
 	// create image views
-	v_swapchain.image_views = make([]vk.ImageView, len(v_swapchain.images))
-	for image, index in v_swapchain.images {
+	engine.swapchain.image_views = make([]vk.ImageView, len(engine.swapchain.images))
+	for image, index in engine.swapchain.images {
 		create_info: vk.ImageViewCreateInfo
 		create_info.sType = .IMAGE_VIEW_CREATE_INFO
 		create_info.image = image
 		create_info.viewType = .D2
-		create_info.format = v_swapchain.format.format
+		create_info.format = engine.swapchain.format.format
 		create_info.components.r = .IDENTITY
 		create_info.components.g = .IDENTITY
 		create_info.components.b = .IDENTITY
@@ -881,35 +902,112 @@ create_image_views :: proc() {
 		create_info.subresourceRange.baseMipLevel = 0
 		create_info.subresourceRange.baseArrayLayer = 0
 
-		if (vk.CreateImageView(v_device, &create_info, nil, &v_swapchain.image_views[index]) !=
+		if (vk.CreateImageView(
+				   engine.device,
+				   &create_info,
+				   nil,
+				   &engine.swapchain.image_views[index],
+			   ) !=
 			   vk.Result.SUCCESS) {
 			fmt.eprint("ERROR: failed to create Image new")
 		}
 	}
 }
-create_renderpass :: proc() {
-	fmt.print("wa")
 
-	frag := create_shader_module(FRAG)
-	vert := create_shader_module(VERT)
 
-	v_shader_stages[0] = {}
-	v_shader_stages[0].sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
-	v_shader_stages[0].module = vert
-	v_shader_stages[0].stage = {.VERTEX}
-	v_shader_stages[0].pName = "main"
+create_layout_info :: proc(
+	shader_stages: ^[2]vk.PipelineShaderStageCreateInfo,
+	pipeline_layout: vk.PipelineLayout,
+	renderpass: vk.RenderPass,
+	pipeline_data: ^PipelineData,
+) -> vk.GraphicsPipelineCreateInfo {
+	pipeline_data.dyanamic_states = []vk.DynamicState {
+		vk.DynamicState.SCISSOR,
+		vk.DynamicState.VIEWPORT,
+	}
 
-	v_shader_stages[1] = {}
-	v_shader_stages[1].sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
-	v_shader_stages[1].module = frag
-	v_shader_stages[1].stage = {.FRAGMENT}
-	v_shader_stages[1].pName = "main"
+	pipeline_data.dyanamic_state_create_info.sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO
+	pipeline_data.dyanamic_state_create_info.dynamicStateCount = u32(
+		len(pipeline_data.dyanamic_states),
+	)
+	pipeline_data.dyanamic_state_create_info.pDynamicStates = &pipeline_data.dyanamic_states[0]
 
-	defer vk.DestroyShaderModule(v_device, vert, nil)
-	defer vk.DestroyShaderModule(v_device, frag, nil)
+	pipeline_data.vertex_input_info.sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+
+	pipeline_data.vertex_input.sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
+	pipeline_data.vertex_input.topology = .TRIANGLE_LIST
+	pipeline_data.vertex_input.primitiveRestartEnable = false
+
+	pipeline_data.viewport_state.sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO
+	pipeline_data.viewport_state.viewportCount = 1
+	pipeline_data.viewport_state.scissorCount = 1
+
+	pipeline_data.rasterizer.sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+	pipeline_data.rasterizer.polygonMode = .FILL
+	pipeline_data.rasterizer.lineWidth = 1
+	pipeline_data.rasterizer.cullMode = {.FRONT}
+	pipeline_data.rasterizer.frontFace = .CLOCKWISE
+
+	pipeline_data.multisampler.sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+	pipeline_data.multisampler.minSampleShading = 1
+	pipeline_data.multisampler.rasterizationSamples = {._1}
+
+	pipeline_data.attachments.colorWriteMask = {.R, .G, .B, .A}
+
+	pipeline_data.color_blend.attachmentCount = 1
+	pipeline_data.color_blend.sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+	pipeline_data.color_blend.pAttachments = &pipeline_data.attachments
+
+	pipeline_info: vk.GraphicsPipelineCreateInfo
+	pipeline_info.sType = .GRAPHICS_PIPELINE_CREATE_INFO
+	pipeline_info.stageCount = 2
+	pipeline_info.pStages = &shader_stages[0]
+	pipeline_info.pVertexInputState = &pipeline_data.vertex_input_info
+	pipeline_info.pInputAssemblyState = &pipeline_data.vertex_input
+	pipeline_info.pViewportState = &pipeline_data.viewport_state
+	pipeline_info.pRasterizationState = &pipeline_data.rasterizer
+	pipeline_info.pMultisampleState = &pipeline_data.multisampler
+	pipeline_info.pColorBlendState = &pipeline_data.color_blend
+	pipeline_info.pDynamicState = &pipeline_data.dyanamic_state_create_info
+	pipeline_info.layout = pipeline_layout
+	pipeline_info.renderPass = renderpass
+	pipeline_info.subpass = 0
+	pipeline_info.basePipelineIndex = -1
+	return pipeline_info
+}
+
+
+create_pipeline :: proc(
+	shader_stages: ^[2]vk.PipelineShaderStageCreateInfo,
+	pipeline_layout: vk.PipelineLayout,
+	renderpass: vk.RenderPass,
+) -> vk.Pipeline {
+
+	pipeline: vk.Pipeline
+	pipeline_data: PipelineData
+	pipeline_info := create_layout_info(shader_stages, pipeline_layout, renderpass, &pipeline_data)
+	fmt.println(" \n", pipeline_info,pipeline)
+
+	if (vk.CreateGraphicsPipelines(engine.device, 0, 1, &pipeline_info, nil, &pipeline) !=
+		   vk.Result.SUCCESS) {
+		fmt.eprint("ERROR: failed to create graphics pipeline")
+	}
+	return pipeline
+}
+
+create_renderpass_info :: proc() -> (renderpass: vk.RenderPass) {
+
+
+	dependency: vk.SubpassDependency
+	dependency.srcSubpass = vk.SUBPASS_EXTERNAL
+	dependency.dstSubpass = 0
+	dependency.srcStageMask = {.COLOR_ATTACHMENT_OUTPUT}
+	dependency.srcAccessMask = {}
+	dependency.dstStageMask = {.COLOR_ATTACHMENT_OUTPUT}
+	dependency.dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
 
 	color_attachment: vk.AttachmentDescription
-	color_attachment.format = v_swapchain.format.format
+	color_attachment.format = engine.swapchain.format.format
 	color_attachment.samples = {._1}
 	color_attachment.loadOp = .CLEAR
 	color_attachment.storeOp = .STORE
@@ -927,16 +1025,6 @@ create_renderpass :: proc() {
 	subpass.colorAttachmentCount = 1
 	subpass.pColorAttachments = &color_attachment_ref
 
-
-	dependency: vk.SubpassDependency
-	dependency.srcSubpass = vk.SUBPASS_EXTERNAL
-	dependency.dstSubpass = 0
-	dependency.srcStageMask = {.COLOR_ATTACHMENT_OUTPUT}
-	dependency.srcAccessMask = {}
-	dependency.dstStageMask = {.COLOR_ATTACHMENT_OUTPUT}
-	dependency.dstAccessMask = {.COLOR_ATTACHMENT_WRITE}
-
-
 	render_pass: vk.RenderPassCreateInfo
 	render_pass.sType = .RENDER_PASS_CREATE_INFO
 	render_pass.attachmentCount = 1
@@ -945,105 +1033,140 @@ create_renderpass :: proc() {
 	render_pass.pSubpasses = &subpass
 	render_pass.dependencyCount = 1
 	render_pass.pDependencies = &dependency
-	
-	if vk.CreateRenderPass(v_device, &render_pass, nil, &v_render_pass) != .SUCCESS {
+
+	if vk.CreateRenderPass(engine.device, &render_pass, nil, &renderpass) != .SUCCESS {
 		fmt.eprint("ERROR: failed to create render pass")
 	}
-	fmt.print("hellow morning")
+	return renderpass
+}
 
+
+create_renderpass :: proc() {
+	fmt.print("wa")
+
+	frag := create_shader_module(FRAG)
+	vert := create_shader_module(VERT)
+	color_tri := create_shader_module(MODEL_VERT)
+	color_tri_frag := create_shader_module(MODEL_FRAG)
+
+
+	engine.shader_stages[0] = {}
+	engine.shader_stages[0].sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
+	engine.shader_stages[0].module = vert
+	engine.shader_stages[0].stage = {.VERTEX}
+	engine.shader_stages[0].pName = "main"
+
+	engine.shader_stages[1] = {}
+	engine.shader_stages[1].sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
+	engine.shader_stages[1].module = frag
+	engine.shader_stages[1].stage = {.FRAGMENT}
+	engine.shader_stages[1].pName = "main"
+
+	engine.mesh_shader_stages[0] = {}
+
+	engine.mesh_shader_stages[0].sType = .PIPELINE_SHADER_STAGE_CREATE_INFO
+	engine.mesh_shader_stages[0].module = color_tri
+	engine.mesh_shader_stages[0].stage = {.VERTEX}
+	engine.mesh_shader_stages[0].pName = "main"
+
+	engine.mesh_shader_stages[1] = engine.shader_stages[1]
+	
+	//engine.mesh_shader_stages[1].module = color_tri_frag 	
+	
+	defer vk.DestroyShaderModule(engine.device, vert, nil)
+	defer vk.DestroyShaderModule(engine.device, frag, nil)
+	defer vk.DestroyShaderModule(engine.device, color_tri, nil)
+
+
+	engine.render_pass = create_renderpass_info()
 	create_frame_buffers()
 
-	dyanamic_states := []vk.DynamicState{vk.DynamicState.SCISSOR, vk.DynamicState.VIEWPORT}
-
-	dyanamic_state_create_info: vk.PipelineDynamicStateCreateInfo
-	dyanamic_state_create_info.sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO
-	dyanamic_state_create_info.dynamicStateCount = u32(len(dyanamic_states))
-	dyanamic_state_create_info.pDynamicStates = &dyanamic_states[0]
-
-	vertex_input_info: vk.PipelineVertexInputStateCreateInfo
-	vertex_input_info.sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
-
-	vertex_input: vk.PipelineInputAssemblyStateCreateInfo
-	vertex_input.sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
-	vertex_input.topology = .TRIANGLE_LIST
-	vertex_input.primitiveRestartEnable = false
-
-	viewport_state: vk.PipelineViewportStateCreateInfo
-	viewport_state.sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO
-	viewport_state.viewportCount = 1
-	viewport_state.scissorCount = 1
-
-	rasterizer: vk.PipelineRasterizationStateCreateInfo
-	rasterizer.sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO
-	rasterizer.polygonMode = .FILL
-	rasterizer.lineWidth = 1
-	rasterizer.cullMode = {.BACK}
-	rasterizer.frontFace = .CLOCKWISE
-
-	multisampler: vk.PipelineMultisampleStateCreateInfo
-	multisampler.sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
-	multisampler.minSampleShading = 1
-	multisampler.rasterizationSamples = {._1}
-
-	attachments: vk.PipelineColorBlendAttachmentState
-	attachments.colorWriteMask = {.R, .G, .B, .A}
-
-	color_blend: vk.PipelineColorBlendStateCreateInfo
-	color_blend.attachmentCount = 1
-	color_blend.sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
-	color_blend.pAttachments = &attachments
+	buffer_range := vk.PushConstantRange {
+		offset     = 0,
+		size       = size_of(Push_Constant),
+		stageFlags = {.VERTEX},
+	}
+	
 
 	pipeline_layout: vk.PipelineLayoutCreateInfo
 	pipeline_layout.sType = .PIPELINE_LAYOUT_CREATE_INFO
 
-	if (vk.CreatePipelineLayout(v_device, &pipeline_layout, nil, &v_pipline_layout) !=
+	if (vk.CreatePipelineLayout(engine.device, &pipeline_layout, nil, &engine.pipeline_layout) !=
 		   vk.Result.SUCCESS) {
 		fmt.eprint("ERROR: failed to create pipeline layout")
 	}
 
-	pipeline: vk.GraphicsPipelineCreateInfo
-	pipeline.sType = .GRAPHICS_PIPELINE_CREATE_INFO
-	pipeline.stageCount = 2
-	pipeline.pStages = &v_shader_stages[0]
-	pipeline.pVertexInputState = &vertex_input_info
-	pipeline.pInputAssemblyState = &vertex_input
-	pipeline.pViewportState = &viewport_state
-	pipeline.pRasterizationState = &rasterizer
-	pipeline.pMultisampleState = &multisampler
-	pipeline.pColorBlendState = &color_blend
-	pipeline.pDynamicState = &dyanamic_state_create_info
-	pipeline.layout = v_pipline_layout
-	pipeline.renderPass = v_render_pass
-	pipeline.subpass = 0
-	pipeline.basePipelineIndex = -1
+	
+	engine.pipline = create_pipeline(
+		&engine.shader_stages,
+		engine.pipeline_layout,
+		engine.render_pass,
+	)
 
-	if (vk.CreateGraphicsPipelines(v_device, 0, 1, &pipeline, nil, &v_pipline) !=
+	pipeline_layout.pushConstantRangeCount = 1
+	pipeline_layout.pPushConstantRanges = &buffer_range
+
+    if (vk.CreatePipelineLayout(engine.device, &pipeline_layout, nil, &engine.mesh_pipeline_layout) !=
 		   vk.Result.SUCCESS) {
-		fmt.eprint("ERROR: failed to create graphics pipeline")
+		fmt.eprint("ERROR: failed to create pipeline layout")
 	}
+	
+    engine.mesh_pipline = create_pipeline(
+	 	&engine.mesh_shader_stages,
+	 	engine.mesh_pipeline_layout,
+	 	engine.render_pass,
+	)
+	
+}
 
+default_data :: proc(){
+	rect_verts := [4]Vertex{
+        { position = {0.5,-0.5, 0},  color = { 0,0, 0.0, 1.0 }},
+        { position = {0.5,0.5, 0},   color = { 0.5, 0.5, 0.5 ,1.0 }},
+        { position = {-0.5,-0.5, 0}, color = { 1,0, 0.0, 1.0 }},
+        { position = {-0.5,0.5, 0},  color = { 0.0, 1.0, 0.0, 1.0 }},
+    }
+    rect_indices := [6]u32 {
+        0, 1, 2,
+        2, 1, 3,
+    }
+    engine.rect = upload_mesh(rect_indices[:], rect_verts[:])
 }
 
 create_command_pool :: proc() {
 	pool_info: vk.CommandPoolCreateInfo
 	pool_info.sType = .COMMAND_POOL_CREATE_INFO
 	pool_info.flags = {.RESET_COMMAND_BUFFER}
-	pool_info.queueFamilyIndex = u32(v_queue_familiy_indicies[.GRAPHICS])
+	pool_info.queueFamilyIndex = u32(engine.queue_familiy_indicies[.GRAPHICS])
 
-	if (vk.CreateCommandPool(v_device, &pool_info, nil, &v_command_pool) != vk.Result.SUCCESS) {
+	if (vk.CreateCommandPool(engine.device, &pool_info, nil, &engine.command_pool) !=
+		   vk.Result.SUCCESS) {
 		fmt.eprint("ERROR: failed to create command pool")
 	}
 
+	if (vk.CreateCommandPool(engine.device, &pool_info, nil, &engine.imm_command_pool) !=
+		   vk.Result.SUCCESS) {
+		fmt.eprint("ERROR: failed to create command pool")
+	}
+
+
 	alloc_info: vk.CommandBufferAllocateInfo
 	alloc_info.sType = .COMMAND_BUFFER_ALLOCATE_INFO
-	alloc_info.commandPool = v_command_pool
+	alloc_info.commandPool = engine.command_pool
 	alloc_info.level = .PRIMARY
-	alloc_info.commandBufferCount = len(v_command_buffer)
+	alloc_info.commandBufferCount = len(engine.command_buffer)
 
-	if (vk.AllocateCommandBuffers(v_device, &alloc_info, &v_command_buffer[0]) !=
+	if (vk.AllocateCommandBuffers(engine.device, &alloc_info, &engine.command_buffer[0]) !=
 		   vk.Result.SUCCESS) {
 		fmt.eprint("ERROR: failed to allocate command buffers")
 	}
+
+
+	if (vk.AllocateCommandBuffers(engine.device, &alloc_info, &engine.imm_command_buffer) !=
+		   vk.Result.SUCCESS) {
+		fmt.eprint("ERROR: failed to allocate command buffers")
+	}
+
 
 }
 
@@ -1055,38 +1178,44 @@ create_sync_object :: proc() {
 	fence.sType = .FENCE_CREATE_INFO
 	fence.flags = {.SIGNALED}
 	for i in 0 ..< SWAP_FRAMES {
-		if (vk.CreateSemaphore(v_device, &semaphore, nil, &v_signal_semaphore[i]) != .SUCCESS) {
+		if (vk.CreateSemaphore(engine.device, &semaphore, nil, &engine.signal_semaphore[i]) !=
+			   .SUCCESS) {
 			fmt.eprint("ERROR: failed to create semaphore")
 		}
-		if (vk.CreateSemaphore(v_device, &semaphore, nil, &v_image_available[i]) != .SUCCESS) {
+		if (vk.CreateSemaphore(engine.device, &semaphore, nil, &engine.image_available[i]) !=
+			   .SUCCESS) {
 			fmt.eprint("ERROR: failed to create semaphore")
 		}
-		if (vk.CreateFence(v_device, &fence, nil, &v_fence[i]) != .SUCCESS) {
+		if (vk.CreateFence(engine.device, &fence, nil, &engine.fence[i]) != .SUCCESS) {
 			fmt.eprint("ERROR: failed to create semaphore")
 		}
+	}
+	fmt.print("fence")
+	if (vk.CreateFence(engine.device, &fence, nil, &engine.immidate_fence) != .SUCCESS) {
+		fmt.eprint("ERROR: failed to create semaphore")
 	}
 }
 
 create_frame_buffers :: proc() {
-	v_swapchain.frame_buffers = make([]vk.Framebuffer, len(v_swapchain.image_views))
+	engine.swapchain.frame_buffers = make([]vk.Framebuffer, len(engine.swapchain.image_views))
 
-	for view, index in v_swapchain.image_views {
+	for view, index in engine.swapchain.image_views {
 		attachments := [?]vk.ImageView{view}
 
 		frame_buffer: vk.FramebufferCreateInfo
 		frame_buffer.sType = .FRAMEBUFFER_CREATE_INFO
-		frame_buffer.renderPass = v_render_pass
+		frame_buffer.renderPass = engine.render_pass
 		frame_buffer.attachmentCount = 1
 		frame_buffer.pAttachments = &attachments[0]
-		frame_buffer.width = v_swapchain.extent.width
-		frame_buffer.height = v_swapchain.extent.height
+		frame_buffer.width = engine.swapchain.extent.width
+		frame_buffer.height = engine.swapchain.extent.height
 		frame_buffer.layers = 1
 
 		if (vk.CreateFramebuffer(
-				   v_device,
+				   engine.device,
 				   &frame_buffer,
 				   nil,
-				   &v_swapchain.frame_buffers[index],
+				   &engine.swapchain.frame_buffers[index],
 			   ) !=
 			   .SUCCESS) {
 			fmt.eprint("ERROR: failed to create frame buffer")
@@ -1104,13 +1233,15 @@ create_shader_module :: proc(code: []byte) -> (module: vk.ShaderModule) {
 	info.pCode = raw_data(shaderData)
 	info.codeSize = len(code)
 
-	if (vk.CreateShaderModule(v_device, &info, nil, &module) == vk.Result.SUCCESS) {
+	if (vk.CreateShaderModule(engine.device, &info, nil, &module) == vk.Result.SUCCESS) {
 		return module
 	} else {
-		fmt.eprint("ERROR: failed to create shader module")
+		fmt.eprintln("ERROR: failed to create shader module")
 	}
 	return
 }
+
+
 load_texture :: proc(path: cstring) -> u32 {
 
 	return 80085
@@ -1159,11 +1290,12 @@ vk_messenger_callback :: proc "system" (
 	return false
 }
 
-record_command_buffer :: proc() {
+record_command_buffer :: proc(image_index: u32) {
 	begin_info: vk.CommandBufferBeginInfo
 	begin_info.sType = .COMMAND_BUFFER_BEGIN_INFO
 
-	command_buffer := v_command_buffer[v_frame_id]
+
+	command_buffer := engine.command_buffer[engine.frame_id]
 	if vk.BeginCommandBuffer(command_buffer, &begin_info) != .SUCCESS {
 		fmt.eprint("ERROR: command buffer not beginning")
 	}
@@ -1173,10 +1305,10 @@ record_command_buffer :: proc() {
 
 	render_pass_begin_info: vk.RenderPassBeginInfo
 	render_pass_begin_info.sType = .RENDER_PASS_BEGIN_INFO
-	render_pass_begin_info.renderPass = v_render_pass
-	render_pass_begin_info.framebuffer = v_swapchain.frame_buffers[v_frame_id]
+	render_pass_begin_info.renderPass = engine.render_pass
+	render_pass_begin_info.framebuffer = engine.swapchain.frame_buffers[image_index]
 	render_pass_begin_info.renderArea = {
-		extent = v_swapchain.extent,
+		extent = engine.swapchain.extent,
 	}
 	render_pass_begin_info.pClearValues = &clear_color
 	render_pass_begin_info.clearValueCount = 1
@@ -1184,24 +1316,66 @@ record_command_buffer :: proc() {
 
 	vk.CmdBeginRenderPass(command_buffer, &render_pass_begin_info, .INLINE)
 
-	vk.CmdBindPipeline(command_buffer, .GRAPHICS, v_pipline)
+	//vk.CmdBindPipeline(command_buffer, .GRAPHICS, engine.)
 
 	viewport: vk.Viewport
 
-	viewport.width = f32(v_swapchain.extent.width)
-	viewport.height = f32(v_swapchain.extent.height)
+	viewport.width = f32(engine.swapchain.extent.width)
+	viewport.height = f32(engine.swapchain.extent.height)
 	viewport.maxDepth = 1.0
 
 	vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
 
 
 	scissor: vk.Rect2D
-	scissor.extent = v_swapchain.extent
+	scissor.extent = engine.swapchain.extent
 
 	vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-    
-	vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+
+	attachment_info := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = engine.swapchain.image_views[image_index],
+		imageLayout = nil,
+		loadOp      = .LOAD,
+		storeOp     = .STORE
+	}
+	rendering_info := vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = scissor,
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = &attachment_info
+		
+	}
+	
+	
+
+	//vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+	vk.CmdBeginRendering(command_buffer,&rendering_info)
+	// begin mesh pipeline
+	vk.CmdBindPipeline(command_buffer,.GRAPHICS,engine.mesh_pipline)
+
+	push_constant := Push_Constant{
+		glm.identity(glm.mat4),
+		engine.rect.vertext_buffer_address
+	}
+	vk.CmdPushConstants(
+		command_buffer,
+		engine.mesh_pipeline_layout,
+		{.VERTEX},
+		0,
+		size_of(Push_Constant),
+		&push_constant
+	
+	)
+
+	vk.CmdBindIndexBuffer(command_buffer,engine.rect.index_buffer.buffer, 0, .UINT32)
+
+	vk.CmdDrawIndexed(command_buffer, 6,1,0,0,0)
+	
+	
 	vk.CmdEndRenderPass(command_buffer)
+	vk.CmdEndRendering(command_buffer)
 	vk.EndCommandBuffer(command_buffer)
 
 }

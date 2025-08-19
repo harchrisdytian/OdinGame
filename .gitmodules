@@ -1,0 +1,6 @@
+[submodule "Extern/odin-vk-bootstrap"]
+	path = Extern/odin-vk-bootstrap
+	url = https://github.com/Capati/odin-vk-bootstrap.git
+[submodule "Extern/odin-vma"]
+	path = Extern/odin-vma
+	url = https://github.com/Capati/odin-vma
