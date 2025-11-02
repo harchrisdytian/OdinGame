@@ -84,6 +84,7 @@ find_memory_type :: proc(
 create_buffer :: proc(
 	size: vk.DeviceSize,
 	usage: vk.BufferUsageFlags,
+	flags: vk.MemoryPropertyFlags = {.HOST_VISIBLE, .HOST_COHERENT},
 	device := engine.device,
 	physicalDevice := engine.physicalDevice,
 ) -> (
@@ -106,11 +107,62 @@ create_buffer :: proc(
 	memInfo.allocationSize = memRequiremnets.size
 	memInfo.memoryTypeIndex = find_memory_type(
 		memRequiremnets.memoryTypeBits,
-		{.HOST_VISIBLE, .HOST_COHERENT},
+		flags,
 		physicalDevice,
 	)
 	memory: vk.DeviceMemory
 	must(vk.AllocateMemory(device, &memInfo, nil, &memory))
-
+	vk.BindBufferMemory(device, buffer, memory, 0)
 	return buffer, memory
+}
+
+begin_single_time_command :: proc(
+	device: vk.Device = engine.device,
+	command_pool: vk.CommandPool = engine.commandPool,
+) -> (
+	buffer: vk.CommandBuffer,
+) {
+	info: vk.CommandBufferAllocateInfo
+	info.sType = .COMMAND_BUFFER_ALLOCATE_INFO
+	info.commandBufferCount = 1
+	info.commandPool = command_pool
+	info.level = .PRIMARY
+
+
+	vk.AllocateCommandBuffers(device, &info, &buffer)
+	command_info: vk.CommandBufferBeginInfo
+	command_info.sType = .COMMAND_BUFFER_BEGIN_INFO
+	command_info.flags = {.ONE_TIME_SUBMIT}
+	vk.BeginCommandBuffer(buffer, &command_info)
+	return buffer
+}
+end_single_time_command :: proc(buffer: ^vk.CommandBuffer, queue: vk.Queue = engine.queue) {
+	vk.EndCommandBuffer(buffer^)
+	submit: vk.SubmitInfo
+	submit.sType = .SUBMIT_INFO
+	submit.commandBufferCount = 1
+	submit.pCommandBuffers = buffer
+
+	vk.QueueSubmit(queue, 1, &submit, {})
+}
+
+find_supported_format :: proc(
+	candidates: []vk.Format,
+	tiling: vk.ImageTiling,
+	features: vk.FormatFeatureFlags,
+	physicalDevice: vk.PhysicalDevice = engine.physicalDevice,
+) -> vk.Format {
+	for format in candidates {
+		prop: vk.FormatProperties
+		vk.GetPhysicalDeviceFormatProperties(physicalDevice, format, &prop)
+		if (tiling == .LINEAR && (prop.linearTilingFeatures & features) == features) {
+			return format
+		}
+		if (tiling == .OPTIMAL && (prop.optimalTilingFeatures & features) == features) {
+			return format
+		}
+	}
+
+	fmt.eprint("failed to find format")
+	return {}
 }
