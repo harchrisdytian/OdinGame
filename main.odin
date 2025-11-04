@@ -17,6 +17,7 @@ import vk "vendor:vulkan"
 // 	color:   glm.vec3,
 // }
 
+USE_X: bool : #config(USE_X, false)
 TITLE :: "The Projector"
 
 FRAMES_IN_FLIGHT :: 2
@@ -130,6 +131,11 @@ create_shader_module :: proc(code: []byte) -> (module: vk.ShaderModule) {
 main :: proc() {
 	defer cleanup()
 
+	when USE_X 
+	{
+		glfw.InitHint(glfw.PLATFORM, glfw.PLATFORM_X11)
+
+	}
 	glfw.Init()
 	glfw.VulkanSupported()
 	defer glfw.Terminate()
@@ -139,7 +145,7 @@ main :: proc() {
 
 	width: i32 = 1600
 	height: i32 = 900
-	engine.window = glfw.CreateWindow(width, height, TITLE, glfw.GetPrimaryMonitor(), nil)
+	engine.window = glfw.CreateWindow(width, height, TITLE, nil, nil)
 	defer glfw.DestroyWindow(engine.window)
 
 	glfw.SetFramebufferSizeCallback(engine.window, framebuffer_resize_callback)
@@ -151,6 +157,8 @@ main :: proc() {
 	create_instance()
 
 	defer destroy_instance()
+
+	vk.load_proc_addresses_instance(engine.instance)
 
 	must(glfw.CreateWindowSurface(engine.instance, engine.window, nil, &engine.surface))
 	graphics_queue: int
@@ -673,6 +681,7 @@ copy_buffer_to_image :: proc(buffer: vk.Buffer, image: vk.Image, width, height: 
 	end_single_time_command(&cmd)
 }
 framebuffer_resize_callback :: proc "c" (window: glfw.WindowHandle, width, height: i32) {
+	engine.resized = true
 
 }
 
@@ -685,7 +694,7 @@ update_uniform_buffer :: proc(currImage: int, speed: f64) {
 	ubo.view = glm.mat4LookAt(glm.vec3{2, 2, 2}, glm.vec3{0, 0, 0}, glm.vec3{0, 1, 0})
 	ubo.proj = glm.mat4Perspective(
 		f32(math.to_radians_f32(45.0)),
-		f32(engine.extent.width) * 2 / f32(engine.extent.height),
+		f32(engine.extent.width) / f32(engine.extent.height),
 		0.1,
 		1000,
 	)
@@ -721,7 +730,7 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 
 	update_uniform_buffer(current_frame, deltaTime)
 	// fmt.print("\n\n\n\nsomething happended here \n\n\n\n")
-	if res == .ERROR_OUT_OF_DATE_KHR {
+	if res == .ERROR_OUT_OF_DATE_KHR || engine.resized {
 		engine.resized = false
 		recreate_swapchain(engine.device, engine.physicalDevice, engine.surface)
 	}
@@ -988,18 +997,32 @@ recreate_swapchain :: proc(
 		width, height = glfw.GetFramebufferSize(engine.window)
 		glfw.WaitEvents()
 	}
-	vk.DeviceWaitIdle(device)
 
+
+	vk.DeviceWaitIdle(device)
+	for image in engine.imageViews {
+		vk.DestroyImageView(engine.device, image, nil)
+	}
+	vk.DestroyImage(engine.device, engine.depth.image, nil)
+	vk.DestroyImageView(engine.device, engine.depth.imageView, nil)
+	vk.FreeMemory(engine.device, engine.depth.imageMemory, nil)
+
+	oldSwapchain := engine.swapchain
 	engine.swapchain, engine.surfaceformat, engine.extent = create_swapchain(
 		physicalDevice,
 		engine.surface,
+		oldSwapchain,
 	)
+	vk.DestroySwapchainKHR(engine.device, oldSwapchain, nil)
 	engine.imageViews = create_image_views(
 		device,
 		engine.swapchain,
 		engine.surfaceformat.format,
 		engine.imageViews,
 	)
+	engine.depth = create_depth_resources(engine.physicalDevice, engine.device, engine.extent)
+
+
 }
 create_graphics_pipeline :: proc(
 	device: vk.Device,
@@ -1159,6 +1182,7 @@ create_image_views :: proc(
 create_swapchain :: proc(
 	device: vk.PhysicalDevice,
 	surface: vk.SurfaceKHR,
+	old_swapchain: vk.SwapchainKHR = {},
 ) -> (
 	vk.SwapchainKHR,
 	vk.SurfaceFormatKHR,
@@ -1186,6 +1210,7 @@ create_swapchain :: proc(
 		compositeAlpha   = {.OPAQUE},
 		presentMode      = mode,
 		clipped          = true,
+		oldSwapchain     = old_swapchain,
 	}
 	swapchain: vk.SwapchainKHR
 	vk.CreateSwapchainKHR(engine.device, &info, nil, &swapchain)
