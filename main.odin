@@ -129,6 +129,9 @@ create_shader_module :: proc(code: []byte) -> (module: vk.ShaderModule) {
 }
 
 main :: proc() {
+	// process_image()
+	calculateFromError()
+
 	defer cleanup()
 
 	when USE_X 
