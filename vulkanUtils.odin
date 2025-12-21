@@ -40,11 +40,12 @@ get_surface_present_modes :: proc(
 
 get_swap_chain_images :: proc(device: vk.Device, swapchain: vk.SwapchainKHR) -> []vk.Image {
 	count: u32
-	vk.GetSwapchainImagesKHR(engine.device, engine.swapchain, &count, nil)
+	vk.GetSwapchainImagesKHR(engine.device, swapchain, &count, nil)
 	images := make([]vk.Image, count)
-	vk.GetSwapchainImagesKHR(engine.device, engine.swapchain, &count, raw_data(images))
+	vk.GetSwapchainImagesKHR(engine.device, swapchain, &count, raw_data(images))
 	return images
 }
+
 create_semaphore :: proc(device: vk.Device) -> vk.Semaphore {
 	semaphoreInfo: vk.SemaphoreCreateInfo
 	semaphoreInfo.sType = .SEMAPHORE_CREATE_INFO

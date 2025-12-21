@@ -40,8 +40,7 @@ Engine :: struct {
 	device:              vk.Device,
 	surface:             vk.SurfaceKHR,
 	surfaceformat:       vk.SurfaceFormatKHR,
-	extent:              vk.Extent2D,
-	swapchain:           vk.SwapchainKHR,
+	swapchain:           Swapchain,
 	queue:               vk.Queue,
 	imageViews:          []vk.ImageView,
 	pipeline:            vk.Pipeline,
@@ -130,7 +129,7 @@ create_shader_module :: proc(code: []byte) -> (module: vk.ShaderModule) {
 
 main :: proc() {
 	// process_image()
-	calculateFromError()
+	// calculateFromError()
 
 	defer cleanup()
 
@@ -174,17 +173,15 @@ main :: proc() {
 
 	vk.GetDeviceQueue(engine.device, 0, u32(graphics_queue), &engine.queue)
 
-	engine.swapchain, engine.surfaceformat, engine.extent = create_swapchain(
-		engine.physicalDevice,
-		engine.surface,
-	)
-	defer vk.DestroySwapchainKHR(engine.device, engine.swapchain, nil)
+	engine.swapchain = Swapchain_make()
+	defer Swapchain_destroy(engine.swapchain)
 
-	images := get_swap_chain_images(engine.device, engine.swapchain)
+
+	images := get_swap_chain_images(engine.device, engine.swapchain.swapchain)
 
 	engine.imageViews = create_image_views(
 		engine.device,
-		engine.swapchain,
+		engine.swapchain.swapchain,
 		engine.surfaceformat.format,
 		engine.imageViews,
 	)
@@ -210,7 +207,11 @@ main :: proc() {
 	engine.commandPool = create_command_pool(engine.device, u32(graphics_queue))
 	defer vk.DestroyCommandPool(engine.device, engine.commandPool, nil)
 
-	engine.depth = create_depth_resources(engine.physicalDevice, engine.device, engine.extent)
+	engine.depth = create_depth_resources(
+		engine.physicalDevice,
+		engine.device,
+		engine.swapchain.extent,
+	)
 
 	engine.commandBuffer = create_command_buffer(engine.device, engine.commandPool)
 
@@ -697,7 +698,7 @@ update_uniform_buffer :: proc(currImage: int, speed: f64) {
 	ubo.view = glm.mat4LookAt(glm.vec3{2, 2, 2}, glm.vec3{0, 0, 0}, glm.vec3{0, 1, 0})
 	ubo.proj = glm.mat4Perspective(
 		f32(math.to_radians_f32(45.0)),
-		f32(engine.extent.width) / f32(engine.extent.height),
+		f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height),
 		0.1,
 		1000,
 	)
@@ -722,26 +723,42 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	// 	u32(offset_of(Vertex, color)),// "\n\n\n\n\n\ncolor{}:pos{}\n\n\n\n",
 	// 	u32(offset_of(Vertex, pos)),
 	// )
+
 	res := vk.AcquireNextImageKHR(
 		engine.device,
-		engine.swapchain,
+		engine.swapchain.swapchain,
 		max(u64),
 		engine.sync_object[current_frame].present,
-		engine.sync_object[current_frame].drawFence,
+		0,
+		// engine.sync_object[current_frame].drawFence,
 		&imageIndex,
 	)
-
-	update_uniform_buffer(current_frame, deltaTime)
+	if imageIndex >= u32(len(engine.imageViews)) {
+		fmt.eprint("ERROR image index is too high")
+		return
+	}
 	// fmt.print("\n\n\n\nsomething happended here \n\n\n\n")
 	if res == .ERROR_OUT_OF_DATE_KHR || engine.resized {
 		engine.resized = false
-		recreate_swapchain(engine.device, engine.physicalDevice, engine.surface)
+		Swapchain_recreate()
+		return
+	} else if res != .SUCCESS && res != .SUBOPTIMAL_KHR {
+		fmt.eprint("failed to equired  swapchain image")
+		return
+	}
+
+	if imageIndex >= u32(len(engine.imageViews)) {
+		fmt.eprint("ERROR: out of bound imageview len")
+		return
+
 	}
 	//  else {
 	// 	fmt.eprint("failed to aquire image")
 	// 	return
 	// }
 	vk.ResetFences(engine.device, 1, &engine.sync_object[current_frame].drawFence)
+
+	update_uniform_buffer(current_frame, deltaTime)
 
 	record_command_buffer(engine.commandBuffer[current_frame], imageIndex, current_frame)
 
@@ -757,13 +774,14 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	submit_info.signalSemaphoreCount = 1
 	submit_info.pSignalSemaphores = &engine.sync_object[current_frame].renderFinished
 	vk.QueueSubmit(engine.queue, 1, &submit_info, engine.sync_object[current_frame].drawFence)
-	out := vk.WaitForFences(
-		engine.device,
-		1,
-		&engine.sync_object[current_frame].drawFence,
-		true,
-		max(u64),
-	)
+
+	// out := vk.WaitForFences(
+	// 	engine.device,
+	// 	1,
+	// 	&engine.sync_object[current_frame].drawFence,
+	// 	true,
+	// 	max(u64),
+	// )
 
 
 	// for vk.WaitForFences(
@@ -777,7 +795,7 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 
 	presentInfo: vk.PresentInfoKHR
 	presentInfo.sType = .PRESENT_INFO_KHR
-	presentInfo.pSwapchains = &engine.swapchain
+	presentInfo.pSwapchains = &engine.swapchain.swapchain
 	presentInfo.swapchainCount = 1
 	presentInfo.waitSemaphoreCount = 1
 	presentInfo.pImageIndices = &imageIndex
@@ -823,7 +841,7 @@ transition_image_layout :: proc(
 	srcStageMask: vk.PipelineStageFlag2,
 	dstStageMask: vk.PipelineStageFlag,
 ) {
-	images := get_swap_chain_images(engine.device, engine.swapchain)
+	images := get_swap_chain_images(engine.device, engine.swapchain.swapchain)
 
 	subresource: vk.ImageSubresourceRange
 
@@ -902,7 +920,7 @@ record_command_buffer :: proc(cmd: vk.CommandBuffer, imageIndex: u32, current_fr
 	depthClear.depthStencil = (vk.ClearDepthStencilValue{1.0, 0})
 
 
-	images := get_swap_chain_images(engine.device, engine.swapchain)
+	images := get_swap_chain_images(engine.device, engine.swapchain.swapchain)
 	attachmentInfo: vk.RenderingAttachmentInfo
 	attachmentInfo.sType = .RENDERING_ATTACHMENT_INFO
 	attachmentInfo.imageView = engine.imageViews[imageIndex]
@@ -920,10 +938,10 @@ record_command_buffer :: proc(cmd: vk.CommandBuffer, imageIndex: u32, current_fr
 
 
 	rect: vk.Rect2D
-	rect.extent = engine.extent
+	rect.extent = engine.swapchain.extent
 	rect.offset = {0.0, 0.0}
 
-	//rect.extent = choose_swapchain_extent(Engine)
+	//rect.extent = chooee_swapchain_extent(Engine)
 	renderingInfo: vk.RenderingInfo
 	renderingInfo.sType = .RENDERING_INFO
 	renderingInfo.renderArea = rect
@@ -940,13 +958,13 @@ record_command_buffer :: proc(cmd: vk.CommandBuffer, imageIndex: u32, current_fr
 	vk.CmdBindIndexBuffer(cmd, engine.indexBuffer, 0, .UINT16)
 
 	scissor: vk.Rect2D
-	scissor.extent = engine.extent
+	scissor.extent = engine.swapchain.extent
 	scissor.offset = vk.Offset2D{0, 0}
 
 	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 	viewport: vk.Viewport
-	viewport.height = f32(engine.extent.height)
-	viewport.width = f32(engine.extent.width)
+	viewport.height = f32(engine.swapchain.extent.height)
+	viewport.width = f32(engine.swapchain.extent.width)
 	vk.CmdSetViewport(cmd, 0, 1, &viewport)
 	vk.CmdBindDescriptorSets(
 		cmd,
@@ -989,44 +1007,6 @@ create_pipeline_layout :: proc(device: vk.Device) -> (vk.PipelineLayout, vk.Desc
 	return layout, descriptor_set
 }
 
-recreate_swapchain :: proc(
-	device: vk.Device,
-	physicalDevice: vk.PhysicalDevice,
-	surface: vk.SurfaceKHR,
-) {
-
-	width, height := glfw.GetFramebufferSize(engine.window)
-	for width == 0 || height == 0 {
-		width, height = glfw.GetFramebufferSize(engine.window)
-		glfw.WaitEvents()
-	}
-
-
-	vk.DeviceWaitIdle(device)
-	for image in engine.imageViews {
-		vk.DestroyImageView(engine.device, image, nil)
-	}
-	vk.DestroyImage(engine.device, engine.depth.image, nil)
-	vk.DestroyImageView(engine.device, engine.depth.imageView, nil)
-	vk.FreeMemory(engine.device, engine.depth.imageMemory, nil)
-
-	oldSwapchain := engine.swapchain
-	engine.swapchain, engine.surfaceformat, engine.extent = create_swapchain(
-		physicalDevice,
-		engine.surface,
-		oldSwapchain,
-	)
-	vk.DestroySwapchainKHR(engine.device, oldSwapchain, nil)
-	engine.imageViews = create_image_views(
-		device,
-		engine.swapchain,
-		engine.surfaceformat.format,
-		engine.imageViews,
-	)
-	engine.depth = create_depth_resources(engine.physicalDevice, engine.device, engine.extent)
-
-
-}
 create_graphics_pipeline :: proc(
 	device: vk.Device,
 	pipelineLayout: vk.PipelineLayout,
@@ -1182,85 +1162,7 @@ create_image_views :: proc(
 	return image_view
 }
 
-create_swapchain :: proc(
-	device: vk.PhysicalDevice,
-	surface: vk.SurfaceKHR,
-	old_swapchain: vk.SwapchainKHR = {},
-) -> (
-	vk.SwapchainKHR,
-	vk.SurfaceFormatKHR,
-	vk.Extent2D,
-) {
-	capabilities: vk.SurfaceCapabilitiesKHR
-	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &capabilities)
-	extent := choose_swapchain_extent(capabilities)
-	format := pick_available_format(get_surface_formats(device, surface))
-	mode := pick_present_mode(get_surface_present_modes(device, surface))
-	minImageCount := max(3, capabilities.minImageCount)
-	minImageCount += 1
-
-	info := vk.SwapchainCreateInfoKHR {
-		sType            = .SWAPCHAIN_CREATE_INFO_KHR,
-		surface          = surface,
-		minImageCount    = u32(minImageCount),
-		imageFormat      = format.format,
-		imageColorSpace  = format.colorSpace,
-		imageUsage       = {.COLOR_ATTACHMENT},
-		imageSharingMode = .EXCLUSIVE,
-		imageExtent      = extent,
-		imageArrayLayers = 1,
-		preTransform     = capabilities.currentTransform,
-		compositeAlpha   = {.OPAQUE},
-		presentMode      = mode,
-		clipped          = true,
-		oldSwapchain     = old_swapchain,
-	}
-	swapchain: vk.SwapchainKHR
-	vk.CreateSwapchainKHR(engine.device, &info, nil, &swapchain)
-	return swapchain, format, extent
-}
-
-pick_available_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
-
-	for format in formats {
-		if format.format == vk.Format.B8G8R8A8_SRGB &&
-		   format.colorSpace == vk.ColorSpaceKHR.SRGB_NONLINEAR {
-			return format
-		}
-	}
-	return formats[0]
-}
-
-pick_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
-	for mode in modes {
-		if mode == vk.PresentModeKHR.MAILBOX {
-			return mode
-		}
-	}
-	return .FIFO
-}
-
-choose_swapchain_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
-	if capabilities.currentExtent.width != max(u32) {
-		return capabilities.currentExtent
-	}
-	width, height := glfw.GetFramebufferSize(engine.window)
-
-	return vk.Extent2D {
-		width = clamp(
-			u32(width),
-			capabilities.minImageExtent.width,
-			capabilities.maxImageExtent.width,
-		),
-		height = clamp(
-			u32(height),
-			capabilities.minImageExtent.height,
-			capabilities.maxImageExtent.height,
-		),
-	}
-}
 pick_physical_device :: proc(devices: []vk.PhysicalDevice) -> (vk.PhysicalDevice, int) {
-
 
 	for device in devices {
 		properties: vk.PhysicalDeviceProperties

@@ -4,10 +4,8 @@ import "core:fmt"
 import stb "vendor:stb/image"
 import vk "vendor:vulkan"
 
+import "core:mem"
 
-Terrain :: struct {
-	ind: []u32,
-}
 
 TERRAIN_BINDING_DESCRIPTION :: vk.VertexInputBindingDescription{0, size_of(u32), .VERTEX}
 TERRAIN_ATTRIBUTE_DESICRIPTION :: [1]vk.VertexInputAttributeDescription {
@@ -165,4 +163,30 @@ processMap :: proc(a, b, c: [2]u32, error: [^]byte, tileSize: u32, indecies: ^[d
 		append(indecies, (b.y * tileSize + b.x))
 		append(indecies, (c.y * tileSize + c.x))
 	}
+}
+
+Terrain :: struct {
+	indexBuffer: vk.Buffer,
+	indexMemory: vk.DeviceMemory,
+	indexCount:  u32,
+}
+
+Terrain_create :: proc() -> Terrain {
+	using terrain: Terrain
+
+	inds := calculateFromError()
+	IND_SIZE := len(inds) * size_of(u32)
+	indexBuffer, indexMemory = create_buffer(
+		vk.DeviceSize(IND_SIZE),
+		{.INDEX_BUFFER, .TRANSFER_DST},
+	)
+
+	data: rawptr
+	vk.MapMemory(engine.device, indexMemory, 0, vk.DeviceSize(vk.WHOLE_SIZE), {}, &data)
+	mem.copy(data, &data, IND_SIZE)
+	vk.UnmapMemory(engine.device, indexMemory)
+	indexCount = u32(len(inds))
+
+	return terrain
+
 }
