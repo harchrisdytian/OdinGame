@@ -10,9 +10,13 @@ Swapchain :: struct {
 	extent:         vk.Extent2D,
 	format:         vk.SurfaceFormatKHR,
 	mode:           vk.PresentModeKHR,
+	images:         []SwapchainImage,
 }
 
-
+SwapchainImage :: struct {
+	image: vk.Image,
+	fence: vk.Fence,
+}
 choose_swapchain_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
 	if capabilities.currentExtent.width != max(u32) {
 		return capabilities.currentExtent
@@ -53,10 +57,15 @@ pick_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
 	return .FIFO
 }
 
+
+Swapchain_get_images :: proc(self: Swapchain, device := engine.device) {
+	images := get_swap_chain_images(device, self.swapchain)
+
+}
 Swapchain_make :: proc(
 	device := engine.device,
 	phyiscialDevice := engine.physicalDevice,
-	surface: vk.SurfaceKHR = engine.surface,
+	surface: vk.SurfaceKHR = engine.swapchain.surface,
 	old_swapchain: Swapchain = engine.swapchain,
 ) -> Swapchain {
 
@@ -96,8 +105,13 @@ Swapchain_make :: proc(
 	return self
 }
 
-Swapchain_destroy :: proc(using self: Swapchain, device := engine.device) {
+Swapchain_destroy :: proc(
+	using self: Swapchain,
+	device := engine.device,
+	instance := engine.instance,
+) {
 	vk.DestroySwapchainKHR(device, swapchain, nil)
+	vk.DestroySurfaceKHR(instance, self.surface, nil)
 }
 
 Swapchain_recreate :: proc(
@@ -122,13 +136,21 @@ Swapchain_recreate :: proc(
 	vk.DestroyImageView(engine.device, engine.depth.imageView, nil)
 	vk.FreeMemory(engine.device, engine.depth.imageMemory, nil)
 
-	Swapchain_destroy(engine.swapchain, device)
-	engine.swapchain = Swapchain_make()
+	old_swapchain := engine.swapchain
+	engine.swapchain = Swapchain_make(
+		device,
+		physicalDevice,
+		engine.swapchain.surface,
+		old_swapchain,
+	)
+
+
+	vk.DestroySwapchainKHR(device, old_swapchain.swapchain, nil)
 
 	engine.imageViews = create_image_views(
 		device,
-		self.swapchain,
-		engine.surfaceformat.format,
+		engine.swapchain.swapchain,
+		engine.swapchain.format.format,
 		engine.imageViews,
 	)
 	engine.depth = create_depth_resources(physicalDevice, device, self.extent)

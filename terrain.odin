@@ -5,8 +5,7 @@ import stb "vendor:stb/image"
 import vk "vendor:vulkan"
 
 import "core:mem"
-
-
+ERROR_MAP_PATH :: "assets/errorMap.png"
 TERRAIN_BINDING_DESCRIPTION :: vk.VertexInputBindingDescription{0, size_of(u32), .VERTEX}
 TERRAIN_ATTRIBUTE_DESICRIPTION :: [1]vk.VertexInputAttributeDescription {
 	vk.VertexInputAttributeDescription{0, 0, .R32_UINT, u32(size_of(u32))},
@@ -94,7 +93,7 @@ process_image :: proc() {
 
 
 	// write_png :: proc(filename: cstring, w, h, comp: c.int, data: rawptr, stride_in_bytes: c.int)     -> c.int ---
-	stb.write_png("assets/errorMap.png", gridSize, gridSize, 1, raw_data(errorMap), gridSize)
+	stb.write_png(ERROR_MAP_PATH, gridSize, gridSize, 1, raw_data(errorMap), gridSize)
 	fmt.printf("width {}, height: {} \n", width, height)
 }
 
@@ -169,6 +168,9 @@ Terrain :: struct {
 	indexBuffer: vk.Buffer,
 	indexMemory: vk.DeviceMemory,
 	indexCount:  u32,
+	image:       vk.Image,
+	imageMem:    vk.DeviceMemory,
+	pipeline:    vk.Pipeline,
 }
 
 Terrain_create :: proc() -> Terrain {
@@ -186,6 +188,33 @@ Terrain_create :: proc() -> Terrain {
 	mem.copy(data, &data, IND_SIZE)
 	vk.UnmapMemory(engine.device, indexMemory)
 	indexCount = u32(len(inds))
+
+	image, imageMem = create_texture_image(ERROR_MAP_PATH)
+
+	// layout: Layout
+	// Layout_add_binding(&layout, .SAMPLER, 2, {.VERTEX})
+	// Layout_add_binding(&layout, .UNIFORM_BUFFER, 0, {.VERTEX})
+	// setData: [1]LayoutDescriptorSetData
+
+	// setData[0].data = UniformBufferObjectData {
+	// 	obj    = {}, // don't think i need for now might remove from struct
+	// 	buffer = engine.uniformBuffer[1],
+	// 	memory = engine.uniformBufferMemory[1],
+	// 	ptr    = engine.uniformBufferMapped,
+	// }
+	// Layout_create_descriptor_set(&layout, setData[:])
+
+	// // PipelineCreater: Pipeline = Pipeline_create(SHADER_MODULE, pipelineLayout)
+	// // Pipeline_create_frag_info(&PipelineCreater, "fragMain")
+	// // Pipeline_create_vert_info(&PipelineCreater, "TerrainMain")
+	// // Pipeline_create_pipeline_vertex(
+	// // 	&PipelineCreater,
+	// // 	{VERTEX_BINDING_DESCRIPTION},
+	// // 	VERTEX_ATTRIBUTE_DESICRIPTION[:],
+	// // )
+	// // Pipeline_create_viewport_state(&PipelineCreater, 1, 1)
+	// // Pipeline_create_rasterizer(&PipelineCreater, .Regular)
+	// // Pipeline_create_Rendering(&PipelineCreater, format)
 
 	return terrain
 

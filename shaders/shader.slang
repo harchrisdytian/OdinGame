@@ -25,6 +25,9 @@ struct VSOutput
 // }
 
 ConstantBuffer<uint> size;
+
+Sampler2D texture;
+
 Sampler2D Hightmap;
 // struct TerrainInput
 // {
@@ -61,7 +64,6 @@ VSOutput vertMain(VSInput input) {
     output.color = input.inColor;
     return output;
 }
-Sampler2D texture;
 
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET {

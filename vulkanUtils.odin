@@ -117,6 +117,11 @@ create_buffer :: proc(
 	return buffer, memory
 }
 
+destroy_buffer :: proc(device: vk.Device, buffer: vk.Buffer, memory: vk.DeviceMemory) {
+	vk.DestroyBuffer(device, buffer, nil)
+	vk.FreeMemory(device, memory, nil)
+}
+
 begin_single_time_command :: proc(
 	device: vk.Device = engine.device,
 	command_pool: vk.CommandPool = engine.commandPool,
