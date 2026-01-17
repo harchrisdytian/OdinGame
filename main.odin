@@ -1,4 +1,5 @@
 package main
+
 import "base:runtime"
 import "core:fmt"
 import "core:math"
@@ -25,10 +26,7 @@ VALIDATION_LAYER: []cstring : {"VK_LAYER_KHRONOS_validation"}
 EXSTENTION_LAYER: []cstring : {vk.EXT_DEBUG_UTILS_EXTENSION_NAME}
 DEVICE_EXSTENTION_LAYER: []cstring : {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
-	vk.KHR_SPIRV_1_4_EXTENSION_NAME,
 	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-	vk.KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
-	vk.EXT_DEBUG_MARKER_EXTENSION_NAME,
 }
 
 SHADER_MODULE :: #load("shaders/slang.spv")
@@ -49,15 +47,26 @@ Engine :: struct {
 	sync_object:         [FRAMES_IN_FLIGHT]SyncObjects,
 	vertBuffer:          vk.Buffer,
 	indexBuffer:         vk.Buffer,
-	uniformBuffer:       [FRAMES_IN_FLIGHT]vk.Buffer,
-	uniformBufferMemory: [FRAMES_IN_FLIGHT]vk.DeviceMemory,
-	uniformBufferMapped: [FRAMES_IN_FLIGHT]rawptr,
+	terrain:             Terrain,
+	uniformBuffer:       vk.Buffer,
+	// uniformBuffer:       [FRAMES_IN_FLIGHT]vk.Buffer,
+	uniformBufferMemory: vk.DeviceMemory,
+	// uniformBufferMemory: [FRAMES_IN_FLIGHT]vk.DeviceMemory,
+	uniformBufferMapped: rawptr,
+	// uniformBufferMapped: [FRAMES_IN_FLIGHT]rawptr,
 	descriptorSet:       [FRAMES_IN_FLIGHT]vk.DescriptorSet,
 	descriptorPool:      vk.DescriptorPool,
 	memory:              vk.DeviceMemory,
 	indexMemory:         vk.DeviceMemory,
 	resized:             bool,
 	depth:               DepthData,
+	image_view:          vk.ImageView,
+	image_sampler:       vk.Sampler,
+	player:              Player,
+}
+Player :: struct {
+	input: glm.vec3,
+	pos:   glm.vec3,
 }
 DepthData :: struct {
 	image:       vk.Image,
@@ -75,6 +84,7 @@ SyncObjects :: struct {
 	present:        vk.Semaphore,
 	renderFinished: vk.Semaphore,
 	drawFence:      vk.Fence,
+	imageAvailable: vk.Semaphore, // Per-image semaphore
 }
 engine: Engine
 
@@ -105,7 +115,33 @@ VERTEX_ATTRIBUTE_DESICRIPTION := [3]vk.VertexInputAttributeDescription {
 }
 
 cleanup :: proc() {
-
+	vk.DeviceWaitIdle(engine.device)
+	
+	// Cleanup terrain resources first
+	vk.DestroyPipeline(engine.device, engine.terrain.pipeline, nil)
+	vk.DestroyPipelineLayout(engine.device, engine.terrain.lay, nil)
+	vk.DestroyDescriptorSetLayout(engine.device, engine.terrain.set, nil)
+	vk.DestroyBuffer(engine.device, engine.terrain.indexBuffer, nil)
+	vk.FreeMemory(engine.device, engine.terrain.indexMemory, nil)
+	vk.DestroyBuffer(engine.device, engine.terrain.size, nil)
+	vk.FreeMemory(engine.device, engine.terrain.sizeMemory, nil)
+	vk.DestroyImage(engine.device, engine.terrain.image, nil)
+	vk.FreeMemory(engine.device, engine.terrain.imageMem, nil)
+	vk.DestroyImageView(engine.device, engine.terrain.view, nil)
+	vk.DestroySampler(engine.device, engine.terrain.sampler, nil)
+	vk.DestroyDescriptorPool(engine.device, engine.terrain.descriptorPool, nil)
+	
+	// Cleanup vertex buffer and related resources
+	vk.DestroyBuffer(engine.device, engine.vertBuffer, nil)
+	vk.FreeMemory(engine.device, engine.memory, nil)
+	vk.DestroyBuffer(engine.device, engine.indexBuffer, nil)
+	vk.FreeMemory(engine.device, engine.indexMemory, nil)
+	vk.DestroyBuffer(engine.device, engine.uniformBuffer, nil)
+	vk.FreeMemory(engine.device, engine.uniformBufferMemory, nil)
+	
+	// Cleanup texture resources
+	vk.DestroyImageView(engine.device, engine.image_view, nil)
+	vk.DestroySampler(engine.device, engine.image_sampler, nil)
 }
 
 
@@ -151,6 +187,7 @@ main :: proc() {
 	defer glfw.DestroyWindow(engine.window)
 
 	glfw.SetFramebufferSizeCallback(engine.window, framebuffer_resize_callback)
+	glfw.SetKeyCallback(engine.window, HandleInput)
 	//fmt.print(rawptr(glfw.GetInstanceProcAddress))
 	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 
@@ -169,8 +206,7 @@ main :: proc() {
 	create_logical_device(engine.physicalDevice, u32(graphics_queue))
 	defer vk.DestroyDevice(engine.device, nil)
 
-
-	vk.GetDeviceQueue(engine.device, 0, u32(graphics_queue), &engine.queue)
+	vk.GetDeviceQueue(engine.device, u32(graphics_queue), 0, &engine.queue)
 
 	engine.swapchain = Swapchain_make()
 	defer Swapchain_destroy(engine.swapchain)
@@ -197,12 +233,12 @@ main :: proc() {
 	Layout_add_binding(&lay, .UNIFORM_BUFFER, 0, {.VERTEX})
 	Layout_add_binding(&lay, .SAMPLER, 2, {.FRAGMENT})
 	engine.layout, descriptor_set_layout = Layout_build(&lay, engine.device)
+
 	defer 
 	{
 		vk.DestroyDescriptorSetLayout(engine.device, descriptor_set_layout, nil)
 		vk.DestroyPipelineLayout(engine.device, engine.layout, nil)
 	}
-
 
 	engine.pipeline = create_graphics_pipeline(
 		engine.device,
@@ -229,11 +265,11 @@ main :: proc() {
 	defer destroy_texture_image(image, imageMemory)
 
 
-	image_view := create_texture_image_view(image)
-	defer vk.DestroyImageView(engine.device, image_view, nil)
+	engine.image_view = create_texture_image_view(image)
+	defer vk.DestroyImageView(engine.device, engine.image_view, nil)
 
-	image_sampler := create_texture_sampler()
-	defer vk.DestroySampler(engine.device, image_sampler, nil)
+	engine.image_sampler = create_texture_sampler()
+	defer vk.DestroySampler(engine.device, engine.image_sampler, nil)
 
 	for &sync_object in engine.sync_object {
 		sync_object = create_sync_object(engine.device)
@@ -248,22 +284,16 @@ main :: proc() {
 	defer destroy_buffer(engine.device, engine.vertBuffer, engine.memory)
 
 
-	engine.indexBuffer, engine.indexMemory = create_index_buffer(
-		engine.device,
-		engine.physicalDevice,
-	)
-	defer destroy_buffer(engine.device, engine.indexBuffer, engine.indexMemory)
+	// for i in 0 ..< FRAMES_IN_FLIGHT {
 
-	for i in 0 ..< FRAMES_IN_FLIGHT {
-
-		engine.uniformBuffer[i], engine.uniformBufferMemory[i], engine.uniformBufferMapped[i] =
-			create_uniform_buffer(engine.device)
-	}
+	engine.uniformBuffer, engine.uniformBufferMemory, engine.uniformBufferMapped =
+		create_uniform_buffer(engine.device)
+	// }
 	defer {
-		for i in 0 ..< FRAMES_IN_FLIGHT {
-			destroy_buffer(engine.device, engine.uniformBuffer[i], engine.uniformBufferMemory[i])
-			// vk.UnmapMemory(engine.device, &engine.uniformBufferMapped[i])
-		}
+		// for i in 0 ..< FRAMES_IN_FLIGHT {
+		destroy_buffer(engine.device, engine.uniformBuffer, engine.uniformBufferMemory)
+		// vk.UnmapMemory(engine.device, &engine.uniformBuferMapped[i])
+		// }
 	}
 
 
@@ -274,9 +304,16 @@ main :: proc() {
 		engine.device,
 		engine.descriptorPool,
 		descriptor_set_layout,
-		image_sampler,
-		image_view,
+		engine.image_sampler,
+		engine.image_view,
 	)
+
+	engine.terrain = Terrain_create()
+	engine.indexBuffer, engine.indexMemory = create_index_buffer(
+		engine.device,
+		engine.physicalDevice,
+	)
+	defer destroy_buffer(engine.device, engine.indexBuffer, engine.indexMemory)
 
 	currentFrame := 0
 	// vk.CreateBuffer()
@@ -335,6 +372,7 @@ create_depth_resources :: proc(
 		{.DEVICE_LOCAL},
 	)
 	data.imageView = create_image_view(device, data.image, depthFormat, {.DEPTH})
+	single_transition_image_layout(data.image, .UNDEFINED, .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, {.DEPTH})
 	return data
 }
 
@@ -567,10 +605,10 @@ create_descriptor_set :: proc(
 
 	vk.AllocateDescriptorSets(device, &info, &sets[0])
 
-	for buffer, index in engine.uniformBuffer {
+	for buffer, index in sets {
 
 		bufferInfo: vk.DescriptorBufferInfo
-		bufferInfo.buffer = engine.uniformBuffer[0]
+		bufferInfo.buffer = engine.uniformBuffer
 		bufferInfo.offset = 0
 		bufferInfo.range = size_of(UniformBufferObject)
 
@@ -687,6 +725,7 @@ create_sync_object :: proc(device: vk.Device) -> SyncObjects {
 	object: SyncObjects
 	object.present = create_semaphore(device)
 	object.renderFinished = create_semaphore(device)
+	object.imageAvailable = create_semaphore(device)
 	object.drawFence = create_fence(device, {.SIGNALED})
 	return object
 }
@@ -694,6 +733,7 @@ create_sync_object :: proc(device: vk.Device) -> SyncObjects {
 destroy_sync_objects :: proc(device: vk.Device, object: SyncObjects) {
 	vk.DestroySemaphore(device, object.present, nil)
 	vk.DestroySemaphore(device, object.renderFinished, nil)
+	vk.DestroySemaphore(device, object.imageAvailable, nil)
 	vk.DestroyFence(device, object.drawFence, nil)
 }
 
@@ -701,6 +741,7 @@ single_transition_image_layout :: proc(
 	image: vk.Image,
 	oldLayout: vk.ImageLayout,
 	newLayout: vk.ImageLayout,
+	aspect: vk.ImageAspectFlags = {.COLOR},
 ) {
 	buffer := begin_single_time_command()
 
@@ -709,11 +750,11 @@ single_transition_image_layout :: proc(
 	barrier.sType = .IMAGE_MEMORY_BARRIER
 	barrier.oldLayout = oldLayout
 	barrier.newLayout = newLayout
-	barrier.subresourceRange = vk.ImageSubresourceRange{{.COLOR}, 0, 1, 0, 1}
+	barrier.subresourceRange = vk.ImageSubresourceRange{aspect, 0, 1, 0, 1}
 
 	barrier.image = image
 	source_stage, destination_stage: vk.PipelineStageFlags
-	if (oldLayout == .UNDEFINED && newLayout == .TRANSFER_SRC_OPTIMAL) {
+	if (oldLayout == .UNDEFINED && newLayout == .TRANSFER_DST_OPTIMAL) {
 		source_stage = {.TOP_OF_PIPE}
 		destination_stage = {.TRANSFER}
 
@@ -725,8 +766,14 @@ single_transition_image_layout :: proc(
 
 		barrier.srcAccessMask = {.TRANSFER_WRITE}
 		barrier.dstAccessMask = {.SHADER_READ}
+	} else if (oldLayout == .UNDEFINED && newLayout == .DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+		source_stage = {.TOP_OF_PIPE}
+		destination_stage = {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}
+
+		barrier.srcAccessMask = {}
+		barrier.dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_WRITE}
 	} else {
-		fmt.eprint("unsupported layout trasition")
+		fmt.eprint("unsupported layout transition")
 	}
 
 	vk.CmdPipelineBarrier(buffer, source_stage, destination_stage, {}, 0, nil, 0, nil, 1, &barrier)
@@ -760,18 +807,24 @@ update_uniform_buffer :: proc(currImage: int, speed: f64) {
 
 	ubo: UniformBufferObject
 	ubo.model = glm.identity(glm.mat4)
-	ubo.model *= glm.mat4Rotate(glm.vec3{0, 0, 1}, f32(speed))
-	ubo.view = glm.mat4LookAt(glm.vec3{2, 2, 2}, glm.vec3{0, 0, 0}, glm.vec3{0, 1, 0})
+
+	// ubo.model *= glm.mat4Rotate(glm.vec3{0, 0, 1}, f32(speed))
+	ubo.view = glm.mat4LookAt(glm.vec3{0, 0, 100}, glm.vec3{0, 0, 0}, glm.vec3{0, 1, 0})
 	ubo.proj = glm.mat4Perspective(
 		f32(math.to_radians_f32(45.0)),
 		f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height),
 		0.1,
-		1000,
+		1000.0,
 	)
 
+	// ubo.model = glm.identity(glm.mat4)
+	engine.player.pos += engine.player.input * 0.1
+	ubo.model += glm.mat4Translate(engine.player.pos)
+	// ubo.view = glm.identity(glm.mat4)
+	// ubo.proj = glm.identity(glm.mat4)
 
 	// fmt.print("something wrong", ubo.model)
-	mem.copy(engine.uniformBufferMapped[currImage], &ubo, size_of(ubo))
+	mem.copy(engine.uniformBufferMapped, &ubo, size_of(ubo))
 }
 
 draw_frame :: proc(current_frame: int, deltaTime: f64) {
@@ -794,7 +847,7 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 		engine.device,
 		engine.swapchain.swapchain,
 		max(u64),
-		engine.sync_object[current_frame].present,
+		engine.sync_object[current_frame].imageAvailable,
 		0,
 		// engine.sync_object[current_frame].drawFence,
 		&imageIndex,
@@ -834,21 +887,13 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	submit_info: vk.SubmitInfo
 	submit_info.sType = .SUBMIT_INFO
 	submit_info.waitSemaphoreCount = 1
-	submit_info.pWaitSemaphores = &engine.sync_object[current_frame].present
+	submit_info.pWaitSemaphores = &engine.sync_object[current_frame].imageAvailable
 	submit_info.pWaitDstStageMask = &stage_mask
 	submit_info.pCommandBuffers = &engine.commandBuffer[current_frame]
 	submit_info.commandBufferCount = 1
 	submit_info.signalSemaphoreCount = 1
-	submit_info.pSignalSemaphores = &engine.sync_object[imageIndex].renderFinished
+	submit_info.pSignalSemaphores = &engine.sync_object[current_frame].renderFinished
 	vk.QueueSubmit(engine.queue, 1, &submit_info, engine.sync_object[current_frame].drawFence)
-
-	// out := vk.WaitForFences(
-	// 	engine.device,
-	// 	1,
-	// 	&engine.sync_object[current_frame].drawFence,
-	// 	true,
-	// 	max(u64),
-	// )
 
 
 	// for vk.WaitForFences(
@@ -866,7 +911,7 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	presentInfo.swapchainCount = 1
 	presentInfo.waitSemaphoreCount = 1
 	presentInfo.pImageIndices = &imageIndex
-	presentInfo.pWaitSemaphores = &engine.sync_object[imageIndex].renderFinished
+	presentInfo.pWaitSemaphores = &engine.sync_object[current_frame].renderFinished
 	vk.QueuePresentKHR(engine.queue, &presentInfo)
 
 }
@@ -1030,6 +1075,7 @@ record_command_buffer :: proc(cmd: vk.CommandBuffer, imageIndex: u32, current_fr
 	vk.CmdBindVertexBuffers(cmd, 0, 1, &engine.vertBuffer, &size)
 	vk.CmdBindIndexBuffer(cmd, engine.indexBuffer, 0, .UINT16)
 
+
 	scissor: vk.Rect2D
 	scissor.extent = engine.swapchain.extent
 	scissor.offset = vk.Offset2D{0, 0}
@@ -1051,6 +1097,20 @@ record_command_buffer :: proc(cmd: vk.CommandBuffer, imageIndex: u32, current_fr
 	)
 	vk.CmdDrawIndexed(cmd, u32(len(indcies)), 1, 0, 0, 0)
 
+	vk.CmdBindPipeline(cmd, .GRAPHICS, engine.terrain.pipeline)
+	// vk.CmdBindPipeline(cmd, engi, engine.terrain.pipeline)
+	vk.CmdBindIndexBuffer(cmd, engine.terrain.indexBuffer, 0, .UINT32)
+	vk.CmdBindDescriptorSets(
+		cmd,
+		.GRAPHICS,
+		engine.terrain.lay,
+		0,
+		1,
+		&engine.terrain.sets[current_frame],
+		0,
+		nil,
+	)
+	vk.CmdDrawIndexed(cmd, engine.terrain.indexCount, 1, 0, 0, 0)
 	vk.CmdEndRendering(cmd)
 	transition_image_layout(
 		cmd,
@@ -1075,6 +1135,7 @@ create_graphics_pipeline :: proc(
 ) -> vk.Pipeline {
 
 	PipelineCreater: Pipeline = Pipeline_create(SHADER_MODULE, pipelineLayout)
+	// PipelineCreater.pipelineLayout = pipelineLayout
 	Pipeline_create_frag_info(&PipelineCreater, "fragMain")
 	Pipeline_create_vert_info(&PipelineCreater, "vertMain")
 	Pipeline_create_pipeline_vertex(
@@ -1219,7 +1280,12 @@ create_logical_device :: proc(device: vk.PhysicalDevice, queue_index: u32) {
 	deviceCreateInfo.enabledExtensionCount = u32(len(enabled_extentions))
 	deviceCreateInfo.ppEnabledExtensionNames = raw_data(enabled_extentions)
 	deviceCreateInfo.pNext = &feature
-	must(vk.CreateDevice(device, &deviceCreateInfo, nil, &engine.device))
+	result := vk.CreateDevice(device, &deviceCreateInfo, nil, &engine.device)
+	if result != .SUCCESS {
+		fmt.eprintf("Failed to create logical device: %v\n", result)
+		return
+	}
+	fmt.println("Logical device created successfully")
 }
 
 create_instance :: proc() {

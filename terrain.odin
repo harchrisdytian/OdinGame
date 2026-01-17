@@ -6,8 +6,10 @@ import vk "vendor:vulkan"
 
 import "core:mem"
 ERROR_MAP_PATH :: "assets/errorMap.png"
+HIGHT_MAP_PATH :: "assets/hightmap.png"
+
 TERRAIN_BINDING_DESCRIPTION :: vk.VertexInputBindingDescription{0, size_of(u32), .VERTEX}
-TERRAIN_ATTRIBUTE_DESICRIPTION :: [1]vk.VertexInputAttributeDescription {
+TERRAIN_ATTRIBUTE_DESICRIPTION := [1]vk.VertexInputAttributeDescription {
 	vk.VertexInputAttributeDescription{0, 0, .R32_UINT, u32(size_of(u32))},
 }
 
@@ -97,7 +99,7 @@ process_image :: proc() {
 	fmt.printf("width {}, height: {} \n", width, height)
 }
 
-calculateFromError :: proc() -> []u32 {
+calculateFromError :: proc() -> ([]u32, u32) {
 	width: i32
 	height: i32
 	channels: i32
@@ -115,7 +117,7 @@ calculateFromError :: proc() -> []u32 {
 	errWidth -= 1
 	// i: int = 1
 	ind := make([dynamic]u32)
-	defer (delete(ind))
+	// defer (delete(ind))
 
 	processMap(
 		{0, 0},
@@ -137,9 +139,9 @@ calculateFromError :: proc() -> []u32 {
 		&ind,
 	)
 
-	fmt.printf("out: {} \n", ind)
+	fmt.printf("out: {} \n, out2: {}", ind, ind[:])
 
-	return ind[:]
+	return ind[:], u32(errWidth - 1)
 }
 
 
@@ -170,51 +172,120 @@ Terrain :: struct {
 	indexCount:  u32,
 	image:       vk.Image,
 	imageMem:    vk.DeviceMemory,
+	size:        vk.Buffer,
+	sizeMemory:  vk.DeviceMemory,
+	sampler:     vk.Sampler,
+	view:        vk.ImageView,
 	pipeline:    vk.Pipeline,
+	lay:         vk.PipelineLayout,
+	set:         vk.DescriptorSetLayout,
+	sets:        []vk.DescriptorSet,
+	descriptorPool: vk.DescriptorPool,
+	gridSize:    uint,
 }
 
 Terrain_create :: proc() -> Terrain {
 	using terrain: Terrain
 
-	inds := calculateFromError()
+	inds, gridSizer := calculateFromError()
+
+	gridSize = uint(gridSizer)
+	fmt.printf("\n\n\nfmt: {}", inds)
+
+
 	IND_SIZE := len(inds) * size_of(u32)
+
+	staging_buffer: vk.Buffer
+	stage_memory: vk.DeviceMemory
+
+	staging_buffer, stage_memory = create_buffer(vk.DeviceSize(IND_SIZE), {.TRANSFER_SRC})
+	defer destroy_buffer(engine.device, staging_buffer, stage_memory)
+
+
+	data: rawptr
+	vk.MapMemory(engine.device, stage_memory, 0, vk.DeviceSize(vk.WHOLE_SIZE), {}, &data)
+	mem.copy(data, raw_data(inds), IND_SIZE)
+	// verify := ([^]u32)(data)
+	// fmt.printf(
+	// 	"Verification - first few copied values: %d, %d, %d\n",
+	// 	verify[0],
+	// 	verify[1],
+	// 	verify[2],
+	// )
+
+	vk.UnmapMemory(engine.device, stage_memory)
+	indexCount = u32(len(inds))
+
 	indexBuffer, indexMemory = create_buffer(
 		vk.DeviceSize(IND_SIZE),
 		{.INDEX_BUFFER, .TRANSFER_DST},
 	)
+	copy_buffer(staging_buffer, indexBuffer, vk.DeviceSize(IND_SIZE))
 
-	data: rawptr
-	vk.MapMemory(engine.device, indexMemory, 0, vk.DeviceSize(vk.WHOLE_SIZE), {}, &data)
-	mem.copy(data, &data, IND_SIZE)
-	vk.UnmapMemory(engine.device, indexMemory)
-	indexCount = u32(len(inds))
+	{
+		size, sizeMemory = create_buffer(vk.DeviceSize(size_of(uint)), {.UNIFORM_BUFFER})
+		sizeData: rawptr
+		vk.MapMemory(engine.device, sizeMemory, 0, vk.DeviceSize(size_of(uint)), {}, &sizeData)
 
-	image, imageMem = create_texture_image(ERROR_MAP_PATH)
+		sizeD := uint(gridSize)
+		fmt.printf("GRID_SIZE {} bn", gridSize)
+		mem.copy_non_overlapping(sizeData, &sizeD, size_of(uint))
+		vk.UnmapMemory(engine.device, sizeMemory)
+		tempdata: rawptr
+		vk.MapMemory(engine.device, sizeMemory, 0, vk.DeviceSize(size_of(u32)), {}, &tempdata)
+		readBack: u32
+		mem.copy(&readBack, tempdata, size_of(uint))
+		fmt.printf("READ BACK{}\n", readBack)
 
-	// layout: Layout
-	// Layout_add_binding(&layout, .SAMPLER, 2, {.VERTEX})
-	// Layout_add_binding(&layout, .UNIFORM_BUFFER, 0, {.VERTEX})
-	// setData: [1]LayoutDescriptorSetData
+	}
+	image, imageMem = create_texture_image(HIGHT_MAP_PATH)
 
-	// setData[0].data = UniformBufferObjectData {
-	// 	obj    = {}, // don't think i need for now might remove from struct
-	// 	buffer = engine.uniformBuffer[1],
-	// 	memory = engine.uniformBufferMemory[1],
-	// 	ptr    = engine.uniformBufferMapped,
-	// }
-	// Layout_create_descriptor_set(&layout, setData[:])
 
-	// // PipelineCreater: Pipeline = Pipeline_create(SHADER_MODULE, pipelineLayout)
-	// // Pipeline_create_frag_info(&PipelineCreater, "fragMain")
-	// // Pipeline_create_vert_info(&PipelineCreater, "TerrainMain")
-	// // Pipeline_create_pipeline_vertex(
-	// // 	&PipelineCreater,
-	// // 	{VERTEX_BINDING_DESCRIPTION},
-	// // 	VERTEX_ATTRIBUTE_DESICRIPTION[:],
-	// // )
-	// // Pipeline_create_viewport_state(&PipelineCreater, 1, 1)
-	// // Pipeline_create_rasterizer(&PipelineCreater, .Regular)
-	// // Pipeline_create_Rendering(&PipelineCreater, format)
+	//create image sampler for some reason
+	sampler = create_texture_sampler()
+	view = create_image_view(engine.device, image, .R8G8B8A8_SRGB, {.COLOR})
+	layout: Layout
+	Layout_add_binding(&layout, .SAMPLER, 3, {.VERTEX}) // height map
+	Layout_add_binding(&layout, .SAMPLER, 2, {.FRAGMENT}) // texture
+	Layout_add_binding(&layout, .UNIFORM_BUFFER, 1, {.VERTEX}) // size
+	Layout_add_binding(&layout, .UNIFORM_BUFFER, 0, {.VERTEX}) // ubo
+	lay, set = Layout_build(&layout, engine.device)
+
+	setData: [4]LayoutDescriptorSetData
+
+	setData[0].data = SamplerData {
+		imageSampler = sampler,
+		imageView    = view,
+	}
+	setData[0].mode = .SAMPLER
+	setData[1].mode = .SAMPLER
+	setData[1].data = SamplerData {
+		imageSampler = sampler,
+		imageView    = view,
+	}
+	setData[2].mode = .UNIFORM_BUFFER
+	setData[2].data = UniformBufferObjectData {
+		size   = size_of(uint), // don't think i need for now might remove from struct
+		buffer = size,
+	}
+
+	setData[3].mode = .UNIFORM_BUFFER
+	setData[3].data = UniformBufferObjectData {
+		size   = size_of(UniformBufferObject), // don't think i need for now might remove from struct
+		buffer = engine.uniformBuffer,
+	}
+	descriptorPool = Layout_create_decriptor_pool(&layout, FRAMES_IN_FLIGHT)
+	sets = Layout_create_descriptor_set(&layout, FRAMES_IN_FLIGHT, setData[:])
+
+	PipelineCreater: Pipeline = Pipeline_create(SHADER_MODULE, lay)
+	Pipeline_create_frag_info(&PipelineCreater, "fragMain")
+	Pipeline_create_vert_info(&PipelineCreater, "TerrainMain")
+	Pipeline_create_pipeline_vertex(&PipelineCreater, {}, {})
+
+	Pipeline_create_viewport_state(&PipelineCreater, 1, 1)
+	Pipeline_create_rasterizer(&PipelineCreater, .Regular)
+	Pipeline_create_Rendering(&PipelineCreater, &engine.swapchain.format.format)
+	pipeline = Pipeline_build(&PipelineCreater)
 
 	return terrain
 

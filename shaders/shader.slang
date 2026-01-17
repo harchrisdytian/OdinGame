@@ -24,7 +24,11 @@ struct VSOutput
 //     uint size;
 // }
 
-ConstantBuffer<uint> size;
+struct terrain
+{
+    uint32_t size;
+}
+ConstantBuffer<terrain> size;
 
 Sampler2D texture;
 
@@ -35,26 +39,36 @@ Sampler2D Hightmap;
 // }
 
 [shader("vertex")]
-VSOutput TerrainMain(uint input)
+VSOutput TerrainMain(uint input: SV_VertexID)
 {
     VSOutput output;
-    float x = (input % size);
-    float y = (input / size);
+    uint width, height;
+    Hightmap.GetDimensions(width,height);
+    uint gridSize = width -1;
 
-    float2 uv = float2(x,y) / float(size - 1);
+    float x = (input % gridSize);
+    float y = (input / gridSize);
 
-    float z = Hightmap.Sample(uv).r;   
-    float4 pos = float4(x,y,z,0);
-    output.pos = mul(ubo.proj,pos);
+    float2 uv = float2(x,y) / gridSize -1
+    ;
+
+    // float scale = 0.1 / float(size);
+    // float offsetX = (x- float(size) * 0.5)* scale;
+    // float offsetY = (y- float(size) * 0.5)* scale;
+
+    float z = Hightmap.SampleLevel(uv,1).r;   
+    float4 pos = float4(x,y,z *1000,1);
+    float4 viewPos = mul(ubo.view, pos);
+    // output.pos = mul(ubo.proj, viewPos);
+
+    output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, pos)));
     output.color = (1,1,1);
     output.fragTexCoord = uv;
 
     return output;
-    
-    
-
-    
 }
+
+
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput output;
@@ -67,5 +81,6 @@ VSOutput vertMain(VSInput input) {
 
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
-    return texture.Sample(vertIn.fragTexCoord);
+    // return texture.Sample(vertIn.fragTexCoord);
+    return float4(1,1,1,1);
 }

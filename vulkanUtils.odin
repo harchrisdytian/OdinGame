@@ -149,7 +149,12 @@ end_single_time_command :: proc(buffer: ^vk.CommandBuffer, queue: vk.Queue = eng
 	submit.commandBufferCount = 1
 	submit.pCommandBuffers = buffer
 
-	vk.QueueSubmit(queue, 1, &submit, {})
+	fence: vk.Fence
+	fence = create_fence(engine.device, {})
+	vk.QueueSubmit(queue, 1, &submit, fence)
+	vk.WaitForFences(engine.device, 1, &fence, true, max(u64))
+	vk.DestroyFence(engine.device, fence, nil)
+	vk.FreeCommandBuffers(engine.device, engine.commandPool, 1, buffer)
 }
 
 find_supported_format :: proc(
