@@ -35,7 +35,7 @@ PipelineFills := [PipelineFillMode]vk.PipelineRasterizationStateCreateInfo {
 		rasterizerDiscardEnable = false,
 		polygonMode = .FILL,
 		cullMode = {.BACK},
-		frontFace = .CLOCKWISE,
+		frontFace = .COUNTER_CLOCKWISE,
 		depthBiasEnable = false,
 		depthBiasSlopeFactor = 1.0,
 		lineWidth = 1.0,
@@ -186,4 +186,3 @@ Pipeline_build :: proc(using self: ^Pipeline, device := engine.device) -> (pipel
 
 	return pipeline
 }
-

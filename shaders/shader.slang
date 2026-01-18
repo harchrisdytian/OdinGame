@@ -44,21 +44,21 @@ VSOutput TerrainMain(uint input: SV_VertexID)
     VSOutput output;
     uint width, height;
     Hightmap.GetDimensions(width,height);
-    uint gridSize = width -1;
+    uint gridSize = width ;
 
     float x = (input % gridSize);
     float y = (input / gridSize);
 
-    float2 uv = float2(x,y) / gridSize -1
-    ;
+    float2 uv = float2(x,y) / gridSize;
 
     // float scale = 0.1 / float(size);
-    // float offsetX = (x- float(size) * 0.5)* scale;
-    // float offsetY = (y- float(size) * 0.5)* scale;
+    // float offsetX = (x - (float(gridSize) * 0.5));
+    // float offsetY = (y - (float(gridSize) * 0.5));
 
-    float z = Hightmap.SampleLevel(uv,1).r;   
-    float4 pos = float4(x,y,z *1000,1);
-    float4 viewPos = mul(ubo.view, pos);
+    float z = Hightmap.SampleLevel(uv,0).r * 10;   
+    float4 pos = float4(x,y,z ,1);
+    
+    // float4 viewPos = mul(ubo.view, pos);
     // output.pos = mul(ubo.proj, viewPos);
 
     output.pos = mul(ubo.proj, mul(ubo.view, mul(ubo.model, pos)));
@@ -82,5 +82,5 @@ VSOutput vertMain(VSInput input) {
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
     // return texture.Sample(vertIn.fragTexCoord);
-    return float4(1,1,1,1);
+    return float4(1,1,vertIn.pos.z,1);
 }

@@ -158,7 +158,7 @@ processMap :: proc(a, b, c: [2]u32, error: [^]byte, tileSize: u32, indecies: ^[d
 	if triangleSize > 1 && (error[m.y * tileSize + m.x] >= maxError) {
 
 		processMap(c, a, m, error, tileSize, indecies)
-		processMap(b, c, m, error, tileSize, indecies)
+		processMap(m, b, c, error, tileSize, indecies)
 	} else {
 		append(indecies, (a.y * tileSize + a.x))
 		append(indecies, (b.y * tileSize + b.x))
@@ -167,21 +167,21 @@ processMap :: proc(a, b, c: [2]u32, error: [^]byte, tileSize: u32, indecies: ^[d
 }
 
 Terrain :: struct {
-	indexBuffer: vk.Buffer,
-	indexMemory: vk.DeviceMemory,
-	indexCount:  u32,
-	image:       vk.Image,
-	imageMem:    vk.DeviceMemory,
-	size:        vk.Buffer,
-	sizeMemory:  vk.DeviceMemory,
-	sampler:     vk.Sampler,
-	view:        vk.ImageView,
-	pipeline:    vk.Pipeline,
-	lay:         vk.PipelineLayout,
-	set:         vk.DescriptorSetLayout,
-	sets:        []vk.DescriptorSet,
+	indexBuffer:    vk.Buffer,
+	indexMemory:    vk.DeviceMemory,
+	indexCount:     u32,
+	image:          vk.Image,
+	imageMem:       vk.DeviceMemory,
+	size:           vk.Buffer,
+	sizeMemory:     vk.DeviceMemory,
+	sampler:        vk.Sampler,
+	view:           vk.ImageView,
+	pipeline:       vk.Pipeline,
+	lay:            vk.PipelineLayout,
+	set:            vk.DescriptorSetLayout,
+	sets:           []vk.DescriptorSet,
 	descriptorPool: vk.DescriptorPool,
-	gridSize:    uint,
+	gridSize:       uint,
 }
 
 Terrain_create :: proc() -> Terrain {
@@ -243,7 +243,7 @@ Terrain_create :: proc() -> Terrain {
 
 	//create image sampler for some reason
 	sampler = create_texture_sampler()
-	view = create_image_view(engine.device, image, .R8G8B8A8_SRGB, {.COLOR})
+	view = create_image_view(engine.device, image, .R8_UNORM, {.COLOR})
 	layout: Layout
 	Layout_add_binding(&layout, .SAMPLER, 3, {.VERTEX}) // height map
 	Layout_add_binding(&layout, .SAMPLER, 2, {.FRAGMENT}) // texture

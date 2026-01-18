@@ -65,7 +65,7 @@ Engine :: struct {
 	player:              Player,
 }
 Player :: struct {
-	input: glm.vec3,
+	input: Input,
 	pos:   glm.vec3,
 }
 DepthData :: struct {
@@ -187,7 +187,7 @@ main :: proc() {
 	defer glfw.DestroyWindow(engine.window)
 
 	glfw.SetFramebufferSizeCallback(engine.window, framebuffer_resize_callback)
-	// glfw.SetKeyCallback(engine.window, HandleInput)
+	glfw.SetKeyCallback(engine.window, HandleInput)
 	//fmt.print(rawptr(glfw.GetInstanceProcAddress))
 	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 
@@ -823,8 +823,8 @@ update_uniform_buffer :: proc(currImage: int, speed: f64) {
 	)
 
 	// ubo.model = glm.identity(glm.mat4)
-	engine.player.pos += engine.player.input * 0.1
-	ubo.model += glm.mat4Translate(engine.player.pos)
+	engine.player.pos += engine.player.input.input * 0.1
+	ubo.model *= glm.mat4Translate(engine.player.pos)
 	// ubo.view = glm.identity(glm.mat4)
 	// ubo.proj = glm.identity(glm.mat4)
 
@@ -857,10 +857,6 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 		// engine.sync_object[current_frame].drawFence,
 		&imageIndex,
 	)
-	if imageIndex >= u32(len(engine.imageViews)) {
-		fmt.eprint("ERROR image index is too high")
-		return
-	}
 	// fmt.print("\n\n\n\nsomething happended here \n\n\n\n")
 	if res == .ERROR_OUT_OF_DATE_KHR || engine.resized {
 		engine.resized = false
@@ -868,14 +864,16 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 		return
 	} else if res != .SUCCESS && res != .SUBOPTIMAL_KHR {
 		fmt.eprint("failed to equired  swapchain image")
+
+		Swapchain_recreate()
 		return
 	}
 
-	if imageIndex >= u32(len(engine.imageViews)) {
-		fmt.eprint("ERROR: out of bound imageview len")
-		return
+	// if imageIndex >= u32(len(engine.imageViews)) {
+	// 	fmt.eprint("ERROR: out of bound imageview len")
+	// 	return
 
-	}
+	// }
 	//  else {
 	// 	fmt.eprint("failed to aquire image")
 	// 	return
@@ -901,14 +899,14 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	vk.QueueSubmit(engine.queue, 1, &submit_info, engine.sync_object[current_frame].drawFence)
 
 
-	// for vk.WaitForFences(
-	// 	    engine.device,
-	// 	    1,
-	// 	    &engine.sync_object[current_frame].drawFence,
-	// 	    true,
-	// 	    max(u64),
-	//     ) ==
-	//     .TIMEOUT {}
+	for vk.WaitForFences(
+		    engine.device,
+		    1,
+		    &engine.sync_object[current_frame].drawFence,
+		    true,
+		    max(u64),
+	    ) ==
+	    .TIMEOUT {}
 
 	presentInfo: vk.PresentInfoKHR
 	presentInfo.sType = .PRESENT_INFO_KHR
@@ -916,7 +914,7 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	presentInfo.swapchainCount = 1
 	presentInfo.waitSemaphoreCount = 1
 	presentInfo.pImageIndices = &imageIndex
-	presentInfo.pWaitSemaphores = &engine.sync_object[current_frame].renderFinished
+	presentInfo.pWaitSemaphores = &engine.sync_object[imageIndex].renderFinished
 	vk.QueuePresentKHR(engine.queue, &presentInfo)
 
 }
