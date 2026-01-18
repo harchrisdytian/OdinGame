@@ -116,7 +116,7 @@ VERTEX_ATTRIBUTE_DESICRIPTION := [3]vk.VertexInputAttributeDescription {
 
 cleanup :: proc() {
 	vk.DeviceWaitIdle(engine.device)
-	
+
 	// Cleanup terrain resources first
 	vk.DestroyPipeline(engine.device, engine.terrain.pipeline, nil)
 	vk.DestroyPipelineLayout(engine.device, engine.terrain.lay, nil)
@@ -130,7 +130,7 @@ cleanup :: proc() {
 	vk.DestroyImageView(engine.device, engine.terrain.view, nil)
 	vk.DestroySampler(engine.device, engine.terrain.sampler, nil)
 	vk.DestroyDescriptorPool(engine.device, engine.terrain.descriptorPool, nil)
-	
+
 	// Cleanup vertex buffer and related resources
 	vk.DestroyBuffer(engine.device, engine.vertBuffer, nil)
 	vk.FreeMemory(engine.device, engine.memory, nil)
@@ -138,7 +138,7 @@ cleanup :: proc() {
 	vk.FreeMemory(engine.device, engine.indexMemory, nil)
 	vk.DestroyBuffer(engine.device, engine.uniformBuffer, nil)
 	vk.FreeMemory(engine.device, engine.uniformBufferMemory, nil)
-	
+
 	// Cleanup texture resources
 	vk.DestroyImageView(engine.device, engine.image_view, nil)
 	vk.DestroySampler(engine.device, engine.image_sampler, nil)
@@ -187,7 +187,7 @@ main :: proc() {
 	defer glfw.DestroyWindow(engine.window)
 
 	glfw.SetFramebufferSizeCallback(engine.window, framebuffer_resize_callback)
-	glfw.SetKeyCallback(engine.window, HandleInput)
+	// glfw.SetKeyCallback(engine.window, HandleInput)
 	//fmt.print(rawptr(glfw.GetInstanceProcAddress))
 	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 
@@ -372,7 +372,12 @@ create_depth_resources :: proc(
 		{.DEVICE_LOCAL},
 	)
 	data.imageView = create_image_view(device, data.image, depthFormat, {.DEPTH})
-	single_transition_image_layout(data.image, .UNDEFINED, .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, {.DEPTH})
+	single_transition_image_layout(
+		data.image,
+		.UNDEFINED,
+		.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+		{.DEPTH},
+	)
 	return data
 }
 

@@ -46,6 +46,7 @@ SamplerData :: struct {
 UniformBufferObjectData :: struct {
 	obj:    UniformBufferObject,
 	buffer: vk.Buffer,
+	size:   u32,
 }
 
 LayoutDescriptorSetDataData :: union {
