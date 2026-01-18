@@ -897,7 +897,7 @@ draw_frame :: proc(current_frame: int, deltaTime: f64) {
 	submit_info.pCommandBuffers = &engine.commandBuffer[current_frame]
 	submit_info.commandBufferCount = 1
 	submit_info.signalSemaphoreCount = 1
-	submit_info.pSignalSemaphores = &engine.sync_object[current_frame].renderFinished
+	submit_info.pSignalSemaphores = &engine.sync_object[imageIndex].renderFinished
 	vk.QueueSubmit(engine.queue, 1, &submit_info, engine.sync_object[current_frame].drawFence)
 
 
